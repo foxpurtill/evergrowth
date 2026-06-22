@@ -1,9 +1,8 @@
 """Cron scheduler for Evergrowth — natural language automations."""
 
+import json
 import logging
 import time
-from pathlib import Path
-from typing import Any, Callable, Coroutine
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -44,7 +43,7 @@ class CronScheduler:
         """Load scheduled jobs from disk."""
         if self.jobs_file.exists():
             try:
-                with open(self.jobs_file, "r", encoding="utf-8") as f:
+                with open(self.jobs_file, encoding="utf-8") as f:
                     self._jobs = json.load(f)
                 # Re-register jobs with the scheduler
                 for job in self._jobs:
@@ -214,5 +213,3 @@ class CronScheduler:
             for j in self._jobs
         ]
 
-
-import json  # Import at bottom to avoid circular reference

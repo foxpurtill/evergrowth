@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import signal
-from pathlib import Path
 
 from .config import EvergrowthConfig, load_config
 
@@ -35,6 +34,8 @@ class EvergrowthRuntime:
         self.identity = None
         self.scheduler = None
         self.mcp_server = None
+        self.tray = None
+        self.window = None
 
     async def start(self):
         """Initialize and start all components."""
@@ -56,6 +57,10 @@ class EvergrowthRuntime:
         await self._init_scheduler()
         await self._init_mcp()
 
+        # Initialize UI if enabled
+        if self.config.tray.enabled:
+            self._init_tray()
+
         logger.info("Evergrowth started — all components initialized")
 
     async def stop(self):
@@ -66,6 +71,12 @@ class EvergrowthRuntime:
         # Cancel all tasks
         for task in self._tasks:
             task.cancel()
+
+        # Shutdown UI first
+        if self.tray:
+            self.tray.stop()
+        if self.window:
+            self.window.stop()
 
         # Shutdown components in reverse order
         if self.mcp_server:
@@ -117,9 +128,19 @@ class EvergrowthRuntime:
         """Initialize the MCP server."""
         from ..mcp.server import EvergrowthMCPServer
         self.mcp_server = EvergrowthMCPServer(
-            self.config, self.memory, self.skills, self.identity, self.heartbeat
+            self.config, self.memory, self.skills, self.identity, self.heartbeat, self.scheduler
         )
         logger.info("MCP server initialized")
+
+    def _init_tray(self):
+        """Initialize the system tray application."""
+        try:
+            from ..ui.tray import TrayApp
+            self.tray = TrayApp(self)
+            self.tray.start()
+            logger.info("System tray initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize tray: {e}")
 
     async def run_forever(self):
         """Run until interrupted."""

@@ -3,8 +3,6 @@
 import json
 import logging
 import time
-from pathlib import Path
-from typing import Any
 
 import aiosqlite
 
@@ -144,7 +142,8 @@ class MemoryEngine:
 
         cursor = await self.db.execute(
             """
-            INSERT INTO memories (content, category, importance, tags, created_at, updated_at, session_id)
+            INSERT INTO memories
+                (content, category, importance, tags, created_at, updated_at, session_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (content, category, importance, tags_json, now, now, session_id),
@@ -259,7 +258,7 @@ class MemoryEngine:
         now = time.time()
         props_json = json.dumps(properties or {})
 
-        cursor = await self.db.execute(
+        await self.db.execute(
             """
             INSERT OR IGNORE INTO entities (name, entity_type, properties, created_at)
             VALUES (?, ?, ?, ?)
@@ -290,7 +289,8 @@ class MemoryEngine:
 
         cursor = await self.db.execute(
             """
-            INSERT INTO relationships (source_id, target_id, relationship_type, properties, created_at)
+            INSERT INTO relationships
+                (source_id, target_id, relationship_type, properties, created_at)
             VALUES (?, ?, ?, ?, ?)
             """,
             (source_id, target_id, relationship_type, props_json, now),

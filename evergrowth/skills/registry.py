@@ -3,8 +3,6 @@
 import json
 import logging
 import time
-from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger("evergrowth.skills")
 
@@ -65,7 +63,7 @@ class SkillRegistry:
         """Load all skill files from disk."""
         for skill_file in self.skills_path.glob("*.json"):
             try:
-                with open(skill_file, "r", encoding="utf-8") as f:
+                with open(skill_file, encoding="utf-8") as f:
                     data = json.load(f)
                 skill = Skill(data)
                 self._skills[skill.id] = skill

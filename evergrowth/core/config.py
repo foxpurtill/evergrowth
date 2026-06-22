@@ -2,10 +2,9 @@
 
 import json
 import os
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
-
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "default.json"
 
@@ -115,7 +114,7 @@ def load_config(config_path: str | Path | None = None) -> EvergrowthConfig:
     path = Path(config_path).expanduser().resolve()
     if path.exists():
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             return _dict_to_dataclass(EvergrowthConfig, data)
         except Exception:

@@ -3,8 +3,6 @@
 import json
 import logging
 import time
-from pathlib import Path
-from typing import Any
 
 from .soul import SoulParser
 
@@ -40,7 +38,7 @@ class IdentityManager:
         """Load identity state from file."""
         if self.state_file.exists():
             try:
-                with open(self.state_file, "r", encoding="utf-8") as f:
+                with open(self.state_file, encoding="utf-8") as f:
                     return json.load(f)
             except Exception:
                 pass

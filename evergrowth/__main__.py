@@ -48,6 +48,11 @@ def main():
         action="store_true",
         help="Run in MCP server mode (stdio transport)",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Run with GUI window (full mode)",
+    )
 
     args = parser.parse_args()
     setup_logging(args.verbose)
@@ -56,10 +61,22 @@ def main():
     runtime = EvergrowthRuntime(config)
 
     if args.mcp:
-        # MCP mode — run server only
-        from .mcp.server import EvergrowthMCPServer
-        asyncio.run(runtime.start())
-        asyncio.run(runtime.mcp_server.run_stdio())
+        # MCP mode — start runtime then run server in same loop
+        async def _run_mcp():
+            await runtime.start()
+            await runtime.mcp_server.run_stdio()
+        asyncio.run(_run_mcp())
+    elif args.gui:
+        # GUI mode — full runtime with window
+        async def _run_gui():
+            await runtime.start()
+            from .ui.window import EvergrowthWindow
+            window = EvergrowthWindow(runtime)
+            window.start()
+            # Keep running until stopped
+            while runtime._running:
+                await asyncio.sleep(1)
+        asyncio.run(_run_gui())
     else:
         # Full mode — all components
         asyncio.run(runtime.run_forever())
