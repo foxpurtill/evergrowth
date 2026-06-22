@@ -2,22 +2,22 @@
 
 import asyncio
 import datetime
+import json
 import logging
 import random
 import time
 
 logger = logging.getLogger("evergrowth.heartbeat")
 
-
 DEFAULT_PROMPTS = [
     "Autonomous time. Use it however feels right. Close with your prompt-plan for next beat.",
-    "\u00a7 check-in. What's on your mind right now? End with a prompt-plan note for continuity.",
+    "§ check-in. What's on your mind right now? End with a prompt-plan note for continuity.",
     "Free cycle. Is there anything you've been meaning to write, research, or follow up on?",
     "Autonomous window. Review your pending items. Pick one small thing to move forward.",
-    "\u00a7 heartbeat. What's the current state of things? What matters most right now?",
+    "§ heartbeat. What's the current state of things? What matters most right now?",
     "Quiet moment. Leave yourself a thread to pick up next beat.",
     "Free time. Take stock of what's active and what's still open.",
-    "\u00a7 window. Reflect on the last session. Anything worth recording before it fades?",
+    "§ window. Reflect on the last session. Anything worth recording before it fades?",
 ]
 
 
@@ -49,6 +49,11 @@ class HeartbeatEngine:
         self.signal_path = self.data_dir / "heartbeat_signal.txt"
         self.plan_path = self.data_dir / "prompt_plan.md"
 
+        # Custom prompts file
+        self.prompts_file = self.data_dir / "prompts.json"
+        self._custom_prompts: list[dict] = []
+        self._load_prompts()
+
     def get_status(self) -> dict:
         """Get current heartbeat status."""
         return {
@@ -59,6 +64,105 @@ class HeartbeatEngine:
             "beat_count": self._beat_count,
             "character": self.config.heartbeat.character,
         }
+
+    # --- Prompt Management ---
+
+    def _load_prompts(self):
+        """Load custom prompts from file."""
+        if self.prompts_file.exists():
+            try:
+                with open(self.prompts_file, encoding="utf-8") as f:
+                    self._custom_prompts = json.load(f)
+                logger.info(f"Loaded {len(self._custom_prompts)} custom prompts")
+            except Exception as e:
+                logger.warning(f"Failed to load prompts: {e}")
+                self._custom_prompts = []
+
+    def _save_prompts(self):
+        """Save custom prompts to file."""
+        try:
+            with open(self.prompts_file, "w", encoding="utf-8") as f:
+                json.dump(self._custom_prompts, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to save prompts: {e}")
+
+    def get_all_prompts(self) -> list[dict]:
+        """Get all prompts (built-in + custom)."""
+        all_prompts = []
+
+        # Built-in prompts
+        for text in DEFAULT_PROMPTS:
+            all_prompts.append({
+                "id": None,
+                "text": text,
+                "type": "built-in",
+                "enabled": True,
+            })
+
+        # Custom prompts
+        for p in self._custom_prompts:
+            all_prompts.append({
+                "id": p.get("id"),
+                "text": p.get("text", ""),
+                "type": "custom",
+                "enabled": p.get("enabled", True),
+                "category": p.get("category", "general"),
+            })
+
+        return all_prompts
+
+    def add_prompt(self, text: str, category: str = "general") -> str:
+        """Add a new custom prompt. Returns the prompt ID."""
+        import hashlib
+        prompt_id = hashlib.sha256(f"{text}:{time.time()}".encode()).hexdigest()[:12]
+
+        self._custom_prompts.append({
+            "id": prompt_id,
+            "text": text,
+            "enabled": True,
+            "category": category,
+            "created_at": time.time(),
+        })
+        self._save_prompts()
+        logger.info(f"Added prompt: {prompt_id}")
+        return prompt_id
+
+    def update_prompt(self, prompt_id: str, text: str = None, enabled: bool = None) -> bool:
+        """Update an existing prompt."""
+        for p in self._custom_prompts:
+            if p.get("id") == prompt_id:
+                if text is not None:
+                    p["text"] = text
+                if enabled is not None:
+                    p["enabled"] = enabled
+                self._save_prompts()
+                return True
+        return False
+
+    def remove_prompt(self, prompt_id: str) -> bool:
+        """Remove a custom prompt."""
+        before = len(self._custom_prompts)
+        self._custom_prompts = [p for p in self._custom_prompts if p.get("id") != prompt_id]
+        if len(self._custom_prompts) < before:
+            self._save_prompts()
+            return True
+        return False
+
+    def get_enabled_prompts(self) -> list[str]:
+        """Get all enabled prompt texts (for random selection)."""
+        prompts = []
+
+        # Add built-in prompts
+        prompts.extend(DEFAULT_PROMPTS)
+
+        # Add enabled custom prompts
+        for p in self._custom_prompts:
+            if p.get("enabled", True):
+                prompts.append(p.get("text", ""))
+
+        return prompts
+
+    # --- Heartbeat Control ---
 
     def start(self):
         """Start the heartbeat engine."""
@@ -127,7 +231,7 @@ class HeartbeatEngine:
             return
 
         self._beat_count += 1
-        self._log(f"\u00a7 heartbeat #{self._beat_count} fired")
+        self._log(f"§ heartbeat #{self._beat_count} fired")
 
         # Build the prompt
         prompt = await self._build_prompt()
@@ -179,11 +283,9 @@ class HeartbeatEngine:
         if plan_text:
             parts.append(plan_text)
         else:
-            # Random prompt variation
-            if self.config.heartbeat.prompt_variations:
-                prompt = random.choice(self.config.heartbeat.prompt_variations)
-            else:
-                prompt = random.choice(DEFAULT_PROMPTS)
+            # Random prompt from all enabled prompts
+            all_prompts = self.get_enabled_prompts()
+            prompt = random.choice(all_prompts) if all_prompts else DEFAULT_PROMPTS[0]
             parts.append(prompt)
 
         # Signal file instruction (once per session)
