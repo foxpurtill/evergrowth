@@ -51,10 +51,12 @@ class EvergrowthWindow:
         self._tabs.pack(fill="both", expand=True, padx=10, pady=10)
 
         self._tab_status = self._tabs.add("Status")
+        self._tab_di = self._tabs.add("DI Loop")
         self._tab_settings = self._tabs.add("Settings")
         self._tab_prompts = self._tabs.add("Prompts")
 
         self._build_status_tab()
+        self._build_di_tab()
         self._build_settings_tab()
         self._build_prompts_tab()
 
@@ -156,6 +158,216 @@ class EvergrowthWindow:
             tab, text="Quit", command=self._on_quit,
             fg_color="#FF4444", hover_color="#CC3333",
         ).pack(pady=15)
+
+    # ========================
+    # DI LOOP TAB
+    # ========================
+
+    def _build_di_tab(self):
+        """Build the DI Loop tab."""
+        tab = self._tab_di
+
+        ctk.CTkLabel(
+            tab, text="DI Loop",
+            font=ctk.CTkFont(size=18, weight="bold"),
+        ).pack(pady=(15, 5))
+
+        ctk.CTkLabel(
+            tab, text="Autonomous AI that responds to heartbeats.",
+            font=ctk.CTkFont(size=11), text_color="gray",
+        ).pack(pady=(0, 10))
+
+        # Provider card
+        prov_card = ctk.CTkFrame(tab)
+        prov_card.pack(fill="x", padx=15, pady=5)
+
+        ctk.CTkLabel(
+            prov_card, text="AI Provider",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(pady=(10, 5))
+
+        row1 = ctk.CTkFrame(prov_card, fg_color="transparent")
+        row1.pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(
+            row1, text="Provider:",
+            font=ctk.CTkFont(size=12),
+        ).pack(side="left")
+
+        # Load current provider from config
+        import json
+        di_config_path = self.runtime.config.resolve_data_dir() / "di_config.json"
+        current_provider = "ollama"
+        if di_config_path.exists():
+            try:
+                with open(di_config_path, encoding="utf-8") as f:
+                    di_cfg = json.load(f)
+                current_provider = di_cfg.get("provider", "ollama")
+            except Exception:
+                pass
+
+        self._provider_var = ctk.StringVar(value=current_provider)
+        self._provider_menu = ctk.CTkOptionMenu(
+            row1, variable=self._provider_var,
+            values=["ollama", "openai", "anthropic", "lmstudio"],
+            command=self._on_provider_changed,
+            width=150,
+        )
+        self._provider_menu.pack(side="right")
+
+        # Model display
+        row2 = ctk.CTkFrame(prov_card, fg_color="transparent")
+        row2.pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(
+            row2, text="Model:",
+            font=ctk.CTkFont(size=12),
+        ).pack(side="left")
+
+        current_model = "gemma4:e4b"
+        if di_config_path.exists():
+            try:
+                with open(di_config_path, encoding="utf-8") as f:
+                    di_cfg = json.load(f)
+                current_model = di_cfg.get("model", "gemma4:e4b")
+            except Exception:
+                pass
+
+        self._model_label = ctk.CTkLabel(
+            row2, text=current_model,
+            font=ctk.CTkFont(size=12), text_color="#88AAFF",
+        )
+        self._model_label.pack(side="right")
+
+        # Status card
+        status_card = ctk.CTkFrame(tab)
+        status_card.pack(fill="x", padx=15, pady=5)
+
+        ctk.CTkLabel(
+            status_card, text="Status",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(pady=(10, 5))
+
+        self._di_status_label = ctk.CTkLabel(
+            status_card, text="DI Loop: STOPPED",
+            font=ctk.CTkFont(size=12),
+        )
+        self._di_status_label.pack(pady=2)
+
+        self._di_provider_label = ctk.CTkLabel(
+            status_card, text="Provider: none",
+            font=ctk.CTkFont(size=12),
+        )
+        self._di_provider_label.pack(pady=2)
+
+        self._di_history_label = ctk.CTkLabel(
+            status_card, text="History: 0 messages",
+            font=ctk.CTkFont(size=12),
+        )
+        self._di_history_label.pack(pady=2)
+
+        # Controls
+        ctrl_card = ctk.CTkFrame(tab)
+        ctrl_card.pack(fill="x", padx=15, pady=5)
+
+        ctk.CTkLabel(
+            ctrl_card, text="Controls",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(pady=(10, 5))
+
+        btn_row = ctk.CTkFrame(ctrl_card, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=5)
+
+        self._di_start_btn = ctk.CTkButton(
+            btn_row, text="Start DI Loop",
+            command=self._on_start_di,
+            fg_color="#44BB44", hover_color="#339933",
+            width=140,
+        )
+        self._di_start_btn.pack(side="left", padx=5)
+
+        self._di_stop_btn = ctk.CTkButton(
+            btn_row, text="Stop DI Loop",
+            command=self._on_stop_di,
+            fg_color="#FF4444", hover_color="#CC3333",
+            width=140,
+        )
+        self._di_stop_btn.pack(side="left", padx=5)
+
+        # Last response preview
+        resp_card = ctk.CTkFrame(tab)
+        resp_card.pack(fill="both", expand=True, padx=15, pady=5)
+
+        ctk.CTkLabel(
+            resp_card, text="Last Response",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).pack(pady=(10, 5))
+
+        self._di_response_box = ctk.CTkTextbox(
+            resp_card, font=ctk.CTkFont(size=11),
+            height=120,
+        )
+        self._di_response_box.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Load last response if exists
+        plan_path = self.runtime.config.resolve_data_dir() / "prompt_plan.md"
+        if plan_path.exists():
+            try:
+                content = plan_path.read_text(encoding="utf-8")
+                # Strip header
+                if "---" in content:
+                    content = content.split("---", 1)[1].strip()
+                self._di_response_box.insert("1.0", content[:500])
+            except Exception:
+                pass
+
+    def _on_provider_changed(self, choice):
+        """Handle provider selection change."""
+        # Map provider to default model
+        defaults = {
+            "ollama": "gemma4:e4b",
+            "openai": "gpt-4o",
+            "anthropic": "claude-sonnet-4-20250514",
+            "lmstudio": "local-model",
+        }
+        model = defaults.get(choice, "unknown")
+        self._model_label.configure(text=model)
+
+        # Save to config
+        import json
+        di_config_path = self.runtime.config.resolve_data_dir() / "di_config.json"
+        try:
+            if di_config_path.exists():
+                with open(di_config_path, encoding="utf-8") as f:
+                    di_cfg = json.load(f)
+            else:
+                di_cfg = {}
+            di_cfg["provider"] = choice
+            di_cfg["model"] = model
+            with open(di_config_path, "w", encoding="utf-8") as f:
+                json.dump(di_cfg, f, indent=2)
+            logger.info(f"Provider changed to {choice}/{model}")
+        except Exception as e:
+            logger.error(f"Failed to save provider config: {e}")
+
+    def _on_start_di(self):
+        """Start the DI loop."""
+        if self.runtime.di_loop and self.runtime.di_loop._running:
+            return
+        # Trigger DI loop init in the async loop
+        if self.runtime._loop:
+            asyncio.run_coroutine_threadsafe(
+                self.runtime._init_di_loop(),
+                self.runtime._loop,
+            )
+
+    def _on_stop_di(self):
+        """Stop the DI loop."""
+        if not self.runtime.di_loop:
+            return
+        if self.runtime._loop:
+            asyncio.run_coroutine_threadsafe(
+                self.runtime.di_loop.stop(),
+                self.runtime._loop,
+            )
 
     # ========================
     # SETTINGS TAB
@@ -500,6 +712,22 @@ class EvergrowthWindow:
                 custom = len(self.runtime.heartbeat._custom_prompts)
                 self._prompts_count_label.configure(
                     text=f"Prompts: {custom} custom"
+                )
+
+            # Update DI loop status
+            if self.runtime.di_loop:
+                di_status = self.runtime.di_loop.get_status()
+                running = di_status.get("running", False)
+                provider = di_status.get("provider", "none")
+                history = di_status.get("history_length", 0)
+                self._di_status_label.configure(
+                    text=f"DI Loop: {'RUNNING' if running else 'STOPPED'}"
+                )
+                self._di_provider_label.configure(
+                    text=f"Provider: {provider}"
+                )
+                self._di_history_label.configure(
+                    text=f"History: {history} messages"
                 )
 
         except Exception as e:

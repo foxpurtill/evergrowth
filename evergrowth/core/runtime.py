@@ -26,6 +26,7 @@ class EvergrowthRuntime:
         self.config = config or load_config()
         self._running = False
         self._tasks: list[asyncio.Task] = []
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         # Components (initialized on start)
         self.memory = None
@@ -42,6 +43,7 @@ class EvergrowthRuntime:
         """Initialize and start all components."""
         logger.info(f"Evergrowth starting — DI: {self.config.di_name}")
         self._running = True
+        self._loop = asyncio.get_running_loop()
 
         # Ensure data directories exist
         data_dir = self.config.resolve_data_dir()
