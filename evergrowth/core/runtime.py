@@ -36,6 +36,7 @@ class EvergrowthRuntime:
         self.mcp_server = None
         self.tray = None
         self.window = None
+        self.di_loop = None
 
     async def start(self):
         """Initialize and start all components."""
@@ -61,6 +62,9 @@ class EvergrowthRuntime:
         if self.config.tray.enabled:
             self._init_tray()
 
+        # Initialize DI loop if configured
+        await self._init_di_loop()
+
         logger.info("Evergrowth started — all components initialized")
 
     async def stop(self):
@@ -77,6 +81,10 @@ class EvergrowthRuntime:
             self.tray.stop()
         if self.window:
             self.window.stop()
+
+        # Shutdown DI loop
+        if self.di_loop:
+            await self.di_loop.stop()
 
         # Shutdown components in reverse order
         if self.mcp_server:
@@ -144,6 +152,23 @@ class EvergrowthRuntime:
             logger.info("System tray initialized")
         except Exception as e:
             logger.warning(f"Failed to initialize tray: {e}")
+
+    async def _init_di_loop(self):
+        """Initialize the persistent DI loop."""
+        di_config_path = self.config.resolve_data_dir() / "di_config.json"
+        if not di_config_path.exists():
+            logger.info("No di_config.json — DI loop not started")
+            return
+
+        try:
+            from ..di.loop import DILoop
+            self.di_loop = DILoop(
+                self.config, self.memory, self.identity, self.heartbeat,
+            )
+            await self.di_loop.start()
+            logger.info("DI loop initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize DI loop: {e}")
 
     async def run_forever(self):
         """Run until interrupted."""
