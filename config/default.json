@@ -1,0 +1,44 @@
+{
+  "di_name": "Lyra",
+  "di_letter": "L",
+  "data_dir": "~/.evergrowth",
+  "heartbeat": {
+    "enabled": true,
+    "default_interval_minutes": 30,
+    "character": "\u00a7",
+    "response_timeout_seconds": 480,
+    "initial_delay_minutes": 5,
+    "prompt_variations": []
+  },
+  "memory": {
+    "db_path": "~/.evergrowth/memory.db",
+    "session_summary_threshold": 1000,
+    "auto_promote_session": true,
+    "max_context_cache_tokens": 400
+  },
+  "skills": {
+    "skills_path": "~/.evergrowth/skills",
+    "auto_create": true,
+    "improve_on_use": true
+  },
+  "identity": {
+    "soul_path": "~/.evergrowth/soul",
+    "vault_path": "",
+    "di_name": "Lyra",
+    "di_letter": "L"
+  },
+  "mcp": {
+    "transport": "stdio",
+    "port": 8080,
+    "host": "localhost"
+  },
+  "scheduler": {
+    "enabled": true,
+    "max_concurrent": 5
+  },
+  "tray": {
+    "enabled": true,
+    "active_color": "#FF4444",
+    "inactive_color": "#44BB44"
+  }
+}
