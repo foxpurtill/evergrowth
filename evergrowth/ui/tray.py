@@ -146,9 +146,7 @@ class TrayApp:
         if not self.runtime.heartbeat or not self._icon:
             return
 
-        is_running = self.runtime.heartbeat._running
-        is_paused = self.runtime.heartbeat._paused
-        is_active = is_running and not is_paused
+        is_active = self.runtime.heartbeat._active
 
         # Only update if state changed
         if is_active == self._last_hb_state:

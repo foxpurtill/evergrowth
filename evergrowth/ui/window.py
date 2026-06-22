@@ -483,9 +483,7 @@ class EvergrowthWindow:
 
             if self.runtime.heartbeat:
                 status = self.runtime.heartbeat.get_status()
-                running = status.get("running", False)
-                paused = status.get("paused", False)
-                is_active = running and not paused
+                is_active = status.get("active", 0)
                 interval = status.get("last_interval_minutes", "?")
                 beats = status.get("beat_count", 0)
                 self._hb_status_label.configure(

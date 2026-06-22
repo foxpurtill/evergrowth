@@ -33,10 +33,9 @@ class HeartbeatEngine:
         self.config = config
         self.memory = memory
         self.identity = identity
-        self._loop = loop  # Must be the main thread's event loop
+        self._loop = loop
 
-        self._running = False
-        self._paused = False
+        self._active = 0  # 0=off, 1=on — single source of truth
         self._timer: asyncio.TimerHandle | None = None
         self._last_interval = config.heartbeat.default_interval_minutes
         self._first_beat = True
@@ -58,8 +57,7 @@ class HeartbeatEngine:
     def get_status(self) -> dict:
         """Get current heartbeat status."""
         return {
-            "running": self._running,
-            "paused": self._paused,
+            "active": self._active,
             "last_interval_minutes": self._last_interval,
             "first_beat": self._first_beat,
             "beat_count": self._beat_count,
@@ -167,72 +165,46 @@ class HeartbeatEngine:
 
     def start(self):
         """Start the heartbeat engine."""
-        if self._running:
+        if self._active:
             return
 
-        self._running = True
-        self._paused = False
-        self._log("Heartbeat engine started")
+        self._active = 1
+        self._log("Heartbeat started")
 
         # Clear stale signal file
         if self.signal_path.exists():
             self.signal_path.unlink()
 
-        self._schedule_next(delay_minutes=self.config.heartbeat.initial_delay_minutes)
+        self._schedule_next(
+            delay_minutes=self.config.heartbeat.initial_delay_minutes,
+        )
 
     def stop(self):
         """Stop the heartbeat engine."""
-        self._running = False
+        self._active = 0
         if self._timer:
             self._timer.cancel()
             self._timer = None
-        self._log("Heartbeat engine stopped")
+        self._log("Heartbeat stopped")
 
-    def pause(self):
-        """Pause heartbeats (DI present)."""
-        self._paused = True
-        if self._timer:
-            self._timer.cancel()
-            self._timer = None
-        self._log("Heartbeat paused")
-
-    def resume(self):
-        """Resume heartbeats (DI away)."""
-        if not self._paused:
-            return
-        self._paused = False
-        self._log("Heartbeat resumed")
-        # Clear stale signal file
-        if self.signal_path.exists():
-            self.signal_path.unlink()
-        self._schedule_next(delay_minutes=self._last_interval)
-
-    def toggle(self) -> bool:
-        """Toggle heartbeat on/off. Returns new running state."""
-        if self._running and not self._paused:
-            self.pause()
-            return False
-        elif self._paused:
-            self.resume()
-            return True
+    def toggle(self) -> int:
+        """Toggle heartbeat. Returns new state (0 or 1)."""
+        if self._active:
+            self.stop()
         else:
             self.start()
-            return True
-
-    def set_next_interval(self, minutes: int):
-        """Set the next heartbeat interval."""
-        self._last_interval = max(1, min(minutes, 1440))
+        return self._active
 
     def _schedule_next(self, delay_minutes: int):
         """Schedule the next heartbeat."""
-        if not self._running or self._paused:
+        if not self._active:
             return
 
         if self._timer:
             self._timer.cancel()
 
         if self._loop is None:
-            self._log("No event loop available for scheduling")
+            self._log("No event loop available")
             return
 
         self._timer = self._loop.call_later(
@@ -243,7 +215,7 @@ class HeartbeatEngine:
 
     async def _fire(self):
         """Fire the heartbeat — build prompt, inject, wait for signal."""
-        if not self._running or self._paused:
+        if not self._active:
             return
 
         self._beat_count += 1
