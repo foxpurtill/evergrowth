@@ -114,7 +114,10 @@ class EvergrowthRuntime:
     async def _init_heartbeat(self):
         """Initialize the heartbeat engine."""
         from ..heartbeat.engine import HeartbeatEngine
-        self.heartbeat = HeartbeatEngine(self.config, self.memory, self.identity)
+        loop = asyncio.get_running_loop()
+        self.heartbeat = HeartbeatEngine(
+            self.config, self.memory, self.identity, loop=loop,
+        )
         logger.info("Heartbeat engine initialized")
 
     async def _init_scheduler(self):

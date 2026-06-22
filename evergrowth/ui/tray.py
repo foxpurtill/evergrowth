@@ -29,7 +29,10 @@ def create_icon_image(color: str = "#FF4444", letter: str = "E") -> Image.Image:
 
     bbox = draw.textbbox((0, 0), letter, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text(((size - tw) / 2, (size - th) / 2 - 2), letter, fill="white", font=font)
+    draw.text(
+        ((size - tw) / 2, (size - th) / 2 - 2),
+        letter, fill="white", font=font,
+    )
 
     return img
 
@@ -48,6 +51,7 @@ class TrayApp:
         self.runtime = runtime
         self._icon = None
         self._running = False
+        self._last_hb_state = None
 
     def start(self):
         """Start the tray app in a background thread."""
@@ -116,7 +120,47 @@ class TrayApp:
             menu,
         )
 
+        # Start background sync thread
+        sync_thread = threading.Thread(
+            target=self._sync_loop, daemon=True,
+        )
+        sync_thread.start()
+
         self._icon.run()
+
+    def _sync_loop(self):
+        """Periodically sync tray icon with heartbeat state."""
+        while self._running:
+            try:
+                self._sync_icon_state()
+            except Exception:
+                pass
+            # Check every 2 seconds
+            for _ in range(20):
+                if not self._running:
+                    return
+                threading.Event().wait(0.1)
+
+    def _sync_icon_state(self):
+        """Update tray icon color based on heartbeat state."""
+        if not self.runtime.heartbeat or not self._icon:
+            return
+
+        is_running = self.runtime.heartbeat._running
+        is_paused = self.runtime.heartbeat._paused
+        is_active = is_running and not is_paused
+
+        # Only update if state changed
+        if is_active == self._last_hb_state:
+            return
+
+        self._last_hb_state = is_active
+        color = "#44BB44" if is_active else "#FF4444"
+        self._icon.icon = create_icon_image(
+            color=color,
+            letter=self.runtime.config.di_letter,
+        )
+        logger.debug(f"Tray icon synced: {'ON' if is_active else 'OFF'}")
 
     def _on_status(self, icon, item):
         """Show status notification."""
@@ -134,16 +178,16 @@ class TrayApp:
             return
 
         is_on = self.runtime.heartbeat.toggle()
-        if is_on:
-            self._update_icon("#44BB44")
-            logger.info("Heartbeat ON")
-        else:
-            self._update_icon("#FF4444")
-            logger.info("Heartbeat OFF")
+        color = "#44BB44" if is_on else "#FF4444"
+        self._icon.icon = create_icon_image(
+            color=color,
+            letter=self.runtime.config.di_letter,
+        )
+        self._last_hb_state = is_on
+        logger.info(f"Heartbeat {'ON' if is_on else 'OFF'}")
 
     def _on_memory_count(self, icon, item):
         """Show memory count."""
-        # This would need async access — log for now
         logger.info("Memory count requested")
 
     def _on_memory_recent(self, icon, item):
@@ -165,12 +209,6 @@ class TrayApp:
         # Signal runtime to stop
         if self.runtime._running:
             loop = asyncio.get_event_loop()
-            loop.call_soon_threadsafe(lambda: asyncio.create_task(self.runtime.stop()))
-
-    def _update_icon(self, color: str):
-        """Update the tray icon color."""
-        if self._icon:
-            self._icon.icon = create_icon_image(
-                color=color,
-                letter=self.runtime.config.di_letter,
+            loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self.runtime.stop())
             )

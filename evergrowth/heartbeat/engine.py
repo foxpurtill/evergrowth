@@ -29,10 +29,11 @@ class HeartbeatEngine:
     The DI sets its own cadence — this engine just keeps the rhythm.
     """
 
-    def __init__(self, config, memory, identity):
+    def __init__(self, config, memory, identity, loop=None):
         self.config = config
         self.memory = memory
         self.identity = identity
+        self._loop = loop  # Must be the main thread's event loop
 
         self._running = False
         self._paused = False
@@ -40,7 +41,6 @@ class HeartbeatEngine:
         self._last_interval = config.heartbeat.default_interval_minutes
         self._first_beat = True
         self._beat_count = 0
-        self._loop: asyncio.AbstractEventLoop | None = None
 
         self.data_dir = config.resolve_data_dir()
         self.log_dir = self.data_dir / "logs"
@@ -173,13 +173,6 @@ class HeartbeatEngine:
         self._running = True
         self._paused = False
         self._log("Heartbeat engine started")
-
-        # Capture the event loop from the thread that calls start()
-        if self._loop is None:
-            try:
-                self._loop = asyncio.get_running_loop()
-            except RuntimeError:
-                self._loop = asyncio.get_event_loop()
 
         # Clear stale signal file
         if self.signal_path.exists():
