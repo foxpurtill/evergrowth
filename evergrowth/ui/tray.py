@@ -204,9 +204,8 @@ class TrayApp:
         """Quit the application."""
         self._running = False
         icon.stop()
-        # Signal runtime to stop
-        if self.runtime._running:
-            loop = asyncio.get_event_loop()
-            loop.call_soon_threadsafe(
+        # Signal runtime to stop using stored loop reference
+        if self.runtime._running and self.runtime._loop:
+            self.runtime._loop.call_soon_threadsafe(
                 lambda: asyncio.create_task(self.runtime.stop())
             )

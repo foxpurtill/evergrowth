@@ -608,9 +608,7 @@ class EvergrowthWindow:
 
             # Apply interval change if running
             if self.runtime.heartbeat and self.runtime.heartbeat._active:
-                self.runtime.heartbeat.set_next_interval(
-                    hb.default_interval_minutes
-                )
+                pass  # Interval applies on next heartbeat cycle
 
             # Save to file
             save_config(self.runtime.config)
