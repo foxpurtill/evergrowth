@@ -36,7 +36,7 @@ class HeartbeatEngine:
         self._loop = loop
 
         self._active = 0  # 0=off, 1=on — single source of truth
-        self._user_interval: int | None = None  # User-set interval overrides DI signal
+        self._user_interval: int | None = config.heartbeat.default_interval_minutes  # From config
         self._timer: asyncio.TimerHandle | None = None
         self._last_interval = config.heartbeat.default_interval_minutes
         self._first_beat = True
