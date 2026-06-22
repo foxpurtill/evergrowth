@@ -606,9 +606,11 @@ class EvergrowthWindow:
             self.runtime.config.di_name = self._name_var.get()
             self.runtime.config.di_letter = self._letter_var.get()
 
-            # Apply interval change if running
-            if self.runtime.heartbeat and self.runtime.heartbeat._active:
-                pass  # Interval applies on next heartbeat cycle
+            # Apply interval change
+            if self.runtime.heartbeat:
+                self.runtime.heartbeat.set_user_interval(
+                    hb.default_interval_minutes
+                )
 
             # Save to file
             save_config(self.runtime.config)
@@ -727,6 +729,20 @@ class EvergrowthWindow:
                 self._di_history_label.configure(
                     text=f"History: {history} messages"
                 )
+
+                # Refresh DI response preview
+                plan_path = self.runtime.config.resolve_data_dir() / "prompt_plan.md"
+                if plan_path.exists():
+                    try:
+                        content = plan_path.read_text(encoding="utf-8")
+                        if "---" in content:
+                            content = content.split("---", 1)[1].strip()
+                        current = self._di_response_box.get("1.0", "end").strip()
+                        if content[:200] != current[:200]:
+                            self._di_response_box.delete("1.0", "end")
+                            self._di_response_box.insert("1.0", content[:1000])
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.debug(f"UI update error: {e}")

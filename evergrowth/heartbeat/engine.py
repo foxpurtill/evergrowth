@@ -36,6 +36,7 @@ class HeartbeatEngine:
         self._loop = loop
 
         self._active = 0  # 0=off, 1=on — single source of truth
+        self._user_interval: int | None = None  # User-set interval overrides DI signal
         self._timer: asyncio.TimerHandle | None = None
         self._last_interval = config.heartbeat.default_interval_minutes
         self._first_beat = True
@@ -188,12 +189,18 @@ class HeartbeatEngine:
         self._log("Heartbeat stopped")
 
     def toggle(self) -> int:
-        """Toggle heartbeat. Returns new state (0 or 1)."""
+        """Toggle heartbeat on/off. Returns new state."""
         if self._active:
             self.stop()
         else:
             self.start()
         return self._active
+
+    def set_user_interval(self, minutes: int):
+        """Set user's preferred interval (overrides DI signal)."""
+        self._user_interval = minutes
+        self._last_interval = minutes
+        self._log(f"User interval set to {minutes} minutes")
 
     def _schedule_next(self, delay_minutes: int):
         """Schedule the next heartbeat."""
@@ -244,8 +251,9 @@ class HeartbeatEngine:
         # Clear first_beat flag after first beat
         self._first_beat = False
 
-        # Schedule next beat
-        self._schedule_next(delay_minutes=self._last_interval)
+        # Schedule next beat — user interval takes precedence
+        interval = self._user_interval if self._user_interval else self._last_interval
+        self._schedule_next(delay_minutes=interval)
 
     async def _build_prompt(self) -> str:
         """Build the heartbeat prompt with context cache."""
