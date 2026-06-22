@@ -253,6 +253,7 @@ class HeartbeatEngine:
 
         # Schedule next beat — user interval takes precedence
         interval = self._user_interval if self._user_interval else self._last_interval
+        self._log(f"Scheduling next: user_interval={self._user_interval}, last_interval={self._last_interval}, using={interval}")
         self._schedule_next(delay_minutes=interval)
 
     async def _build_prompt(self) -> str:
