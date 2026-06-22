@@ -65,8 +65,9 @@ class TrayApp:
 
     def _run(self):
         """Run the tray icon (blocking call in thread)."""
+        # Start red since heartbeat isn't running yet
         icon_image = create_icon_image(
-            color="#44BB44",
+            color="#FF4444",
             letter=self.runtime.config.di_letter,
         )
 
