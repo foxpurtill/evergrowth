@@ -607,7 +607,7 @@ class EvergrowthWindow:
             self.runtime.config.di_letter = self._letter_var.get()
 
             # Apply interval change if running
-            if self.runtime.heartbeat and self.runtime.heartbeat._running:
+            if self.runtime.heartbeat and self.runtime.heartbeat._active:
                 self.runtime.heartbeat.set_next_interval(
                     hb.default_interval_minutes
                 )
