@@ -376,10 +376,7 @@ class EvergrowthWindow:
         """Toggle heartbeat on/off."""
         if not self.runtime.heartbeat:
             return
-        if self.runtime.heartbeat._running:
-            self.runtime.heartbeat.pause()
-        else:
-            self.runtime.heartbeat.resume()
+        self.runtime.heartbeat.toggle()
 
     def _on_save_settings(self):
         """Save settings to config."""
@@ -487,10 +484,12 @@ class EvergrowthWindow:
             if self.runtime.heartbeat:
                 status = self.runtime.heartbeat.get_status()
                 running = status.get("running", False)
+                paused = status.get("paused", False)
+                is_active = running and not paused
                 interval = status.get("last_interval_minutes", "?")
                 beats = status.get("beat_count", 0)
                 self._hb_status_label.configure(
-                    text=f"Status: {'ON' if running else 'OFF'}"
+                    text=f"Status: {'ON' if is_active else 'OFF'}"
                 )
                 self._hb_interval_label.configure(
                     text=f"Interval: {interval} min"

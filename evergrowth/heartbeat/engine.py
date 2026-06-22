@@ -206,6 +206,18 @@ class HeartbeatEngine:
             self.signal_path.unlink()
         self._schedule_next(delay_minutes=self._last_interval)
 
+    def toggle(self) -> bool:
+        """Toggle heartbeat on/off. Returns new running state."""
+        if self._running and not self._paused:
+            self.pause()
+            return False
+        elif self._paused:
+            self.resume()
+            return True
+        else:
+            self.start()
+            return True
+
     def set_next_interval(self, minutes: int):
         """Set the next heartbeat interval."""
         self._last_interval = max(1, min(minutes, 1440))

@@ -132,14 +132,13 @@ class TrayApp:
         if not self.runtime.heartbeat:
             return
 
-        if self.runtime.heartbeat._running:
-            self.runtime.heartbeat.pause()
-            self._update_icon("#FF4444")
-            logger.info("Heartbeat paused")
-        else:
-            self.runtime.heartbeat.resume()
+        is_on = self.runtime.heartbeat.toggle()
+        if is_on:
             self._update_icon("#44BB44")
-            logger.info("Heartbeat resumed")
+            logger.info("Heartbeat ON")
+        else:
+            self._update_icon("#FF4444")
+            logger.info("Heartbeat OFF")
 
     def _on_memory_count(self, icon, item):
         """Show memory count."""

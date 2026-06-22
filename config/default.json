@@ -4,8 +4,8 @@
   "data_dir": "~/.evergrowth",
   "heartbeat": {
     "enabled": true,
-    "default_interval_minutes": 30,
-    "character": "\u00a7",
+    "default_interval_minutes": 10,
+    "character": "§",
     "response_timeout_seconds": 480,
     "initial_delay_minutes": 5,
     "prompt_variations": []
