@@ -40,6 +40,7 @@ class HeartbeatEngine:
         self._last_interval = config.heartbeat.default_interval_minutes
         self._first_beat = True
         self._beat_count = 0
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         self.data_dir = config.resolve_data_dir()
         self.log_dir = self.data_dir / "logs"
@@ -173,6 +174,13 @@ class HeartbeatEngine:
         self._paused = False
         self._log("Heartbeat engine started")
 
+        # Capture the event loop from the thread that calls start()
+        if self._loop is None:
+            try:
+                self._loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self._loop = asyncio.get_event_loop()
+
         # Clear stale signal file
         if self.signal_path.exists():
             self.signal_path.unlink()
@@ -230,8 +238,11 @@ class HeartbeatEngine:
         if self._timer:
             self._timer.cancel()
 
-        loop = asyncio.get_event_loop()
-        self._timer = loop.call_later(
+        if self._loop is None:
+            self._log("No event loop available for scheduling")
+            return
+
+        self._timer = self._loop.call_later(
             delay_minutes * 60,
             lambda: asyncio.ensure_future(self._fire()),
         )
