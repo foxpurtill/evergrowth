@@ -5,6 +5,7 @@ import json
 import logging
 
 from .providers import AIProvider, load_provider
+from .voice import speak
 
 logger = logging.getLogger("evergrowth.di.loop")
 
@@ -214,6 +215,9 @@ class DILoop:
 
         # Add response to history
         self._history.append({"role": "assistant", "content": response})
+
+        # Speak the response
+        speak(response)
 
         # Parse next interval
         next_interval = self._parse_next_interval(response)
