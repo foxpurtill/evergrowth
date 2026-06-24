@@ -1,0 +1,98 @@
+{
+  "tools": [
+    {
+      "name": "ue_spawn_actor",
+      "description": "Spawn an actor in the current level",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "class_path": {"type": "string", "description": "Blueprint or C++ class path"},
+          "transform": {
+            "type": "object",
+            "properties": {
+              "location": {"type": "array", "items": {"type": "number"}},
+              "rotation": {"type": "array", "items": {"type": "number"}},
+              "scale": {"type": "array", "items": {"type": "number"}}
+            }
+          },
+          "level": {"type": "string"}
+        },
+        "required": ["class_path"]
+      }
+    },
+    {
+      "name": "ue_set_material",
+      "description": "Apply material to actor or component",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "actor_path": {"type": "string"},
+          "material_path": {"type": "string"},
+          "slot_index": {"type": "integer", "default": 0}
+        },
+        "required": ["actor_path", "material_path"]
+      }
+    },
+    {
+      "name": "ue_run_blueprint_function",
+      "description": "Execute a blueprint function on an actor",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "actor_path": {"type": "string"},
+          "function_name": {"type": "string"},
+          "parameters": {"type": "object"}
+        },
+        "required": ["actor_path", "function_name"]
+      }
+    },
+    {
+      "name": "ue_create_level_sequence",
+      "description": "Create cinematic sequence for video book",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sequence_name": {"type": "string"},
+          "shots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "camera": {"type": "string"},
+                "duration": {"type": "number"},
+                "track": {"type": "string"}
+              },
+              "required": ["camera", "duration"]
+            }
+          },
+          "output_path": {"type": "string"}
+        },
+        "required": ["sequence_name"]
+      }
+    },
+    {
+      "name": "ue_inspect_scene",
+      "description": "Get current level hierarchy and actor properties",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {"type": "string"},
+          "filter": {"type": "string"}
+        }
+      }
+    },
+    {
+      "name": "ue_import_asset",
+      "description": "Import FBX/GLTF/Texture into project",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source_path": {"type": "string"},
+          "destination_path": {"type": "string"},
+          "import_settings": {"type": "object"}
+        },
+        "required": ["source_path", "destination_path"]
+      }
+    }
+  ]
+}
