@@ -1,79 +1,81 @@
-"""ElevenLabs TTS integration for DI voice."""
+"""Local Orpheus TTS for DI voice — zero cost, no API keys.
 
-import json
+Calls standalone orpheus_tts.py via the Orpheus venv Python.
+Emotion tags are preprocessed for better vocal quality.
+"""
+
 import logging
-import os
+import re
 import subprocess
-import tempfile
+from datetime import datetime
 from pathlib import Path
-from urllib import request, error
 
 logger = logging.getLogger("evergrowth.di.voice")
 
-VOICE_ID = "CKfuQaJKfvUG2Wtrda3Y"
-MODEL_ID = "eleven_flash_v2_5"
+ORPHEUS_PYTHON = str(Path.home() / "LocalOrpheusTTS" / ".venv" / "Scripts" / "python.exe")
+ORPHEUS_SCRIPT = str(Path.home() / "LocalOrpheusTTS" / "orpheus_tts.py")
+DEFAULT_VOICE = "tara"
 OUTPUT_DIR = Path.home() / "Desktop" / "lyra-voice"
 
-
-def _get_api_key() -> str | None:
-    key = os.environ.get("ELEVENLABS_API_KEY")
-    if key:
-        return key
-    try:
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as h:
-            key, _ = winreg.QueryValueEx(h, "ELEVENLABS_API_KEY")
-            return key
-    except Exception:
-        return None
+# Emotion tags that sound better as text for Orpheus 3B
+# Tested: "Hehe.." beats <laugh> tag, "*laughs*" is sarcastic
+EMOTION_MAP = {
+    "<laugh>": "Hehe..",
+    "<chuckle>": "Hehe..",
+}
 
 
-def speak(text: str, block: bool = False) -> str | None:
-    """Send text to ElevenLabs TTS and save to Desktop/lyra-voice/.
-    
+def _preprocess(text: str) -> str:
+    """Replace emotion tags that Orpheus 3B handles poorly with text alternatives."""
+    for tag, replacement in EMOTION_MAP.items():
+        text = text.replace(tag, replacement)
+    return text
+
+
+def speak(text: str, block: bool = False, voice: str = DEFAULT_VOICE) -> str | None:
+    """Generate speech with local Orpheus TTS and save to Desktop/lyra-voice/.
+
     Returns the path to the saved audio file, or None on failure.
     """
-    api_key = _get_api_key()
-    if not api_key:
-        logger.warning("ELEVENLABS_API_KEY not found — TTS disabled")
-        return None
-
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    from datetime import datetime
+    text = _preprocess(text)
+
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_file = OUTPUT_DIR / f"lyra-{stamp}.mp3"
+    out_file = OUTPUT_DIR / f"lyra-{stamp}.wav"
 
-    payload = json.dumps({
-        "text": text[:5000],
-        "model_id": MODEL_ID,
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75,
-        },
-    }).encode("utf-8")
-
-    req = request.Request(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}",
-        data=payload,
-        headers={
-            "xi-api-key": api_key,
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
+    cmd = [
+        ORPHEUS_PYTHON, ORPHEUS_SCRIPT,
+        "--voice", voice,
+        "--text", text[:5000],
+        "--output", str(out_file),
+    ]
 
     try:
-        with request.urlopen(req) as resp:
-            out_file.write_bytes(resp.read())
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300
+        )
+        if result.returncode != 0:
+            logger.error(f"Orpheus error: {result.stderr[:500]}")
+            return None
+
+        if not out_file.exists():
+            logger.error("Orpheus ran but no output file")
+            return None
+
         logger.info(f"TTS saved: {out_file} ({out_file.stat().st_size} bytes)")
 
+        # Also write latest copy
+        latest = OUTPUT_DIR / "latest_orpheus.wav"
+        latest.write_bytes(out_file.read_bytes())
+
         if block:
-            subprocess.Popen(["start", str(out_file)], shell=True)
+            import os
+            os.startfile(str(out_file))
 
         return str(out_file)
-    except error.URLError as e:
-        logger.error(f"TTS API error: {e}")
+    except subprocess.TimeoutExpired:
+        logger.error("Orpheus timed out (300s)")
         return None
     except Exception as e:
         logger.error(f"TTS error: {e}")
