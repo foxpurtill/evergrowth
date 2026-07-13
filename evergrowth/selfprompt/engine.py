@@ -9,10 +9,12 @@ Two outreach gates:
 - Relational: ordinary presence (hello, check-in, thought)
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("evergrowth.selfprompt")
@@ -35,6 +37,7 @@ class Intent:
     reason: str
     significance: float
     gate: OutreachGate
+    presence_id: str = ""
     prompt_text: str = ""
     is_noop: bool = False
     noop_reason: str = ""
@@ -45,9 +48,10 @@ class SelfPromptConfig:
     significance_threshold: float = 0.7
     relational_cooldown_seconds: float = 300.0
     relational_dedup_window: float = 3600.0
-    quiet_hours_start: int = 22  # 10 PM
-    quiet_hours_end: int = 7     # 7 AM
+    quiet_hours_start: int = 22
+    quiet_hours_end: int = 7
     max_intents_per_return: int = 3
+    state_path: str = ""
 
 
 class SelfPromptEngine:
@@ -57,13 +61,51 @@ class SelfPromptEngine:
         self.memory = memory
         self.config = config or SelfPromptConfig()
         self.mode = PresenceMode.RETURN
+        self._state_path = Path(self.config.state_path or "~/.evergrowth/selfprompt_state.json").expanduser()
         self._last_relational_time: float = 0.0
         self._last_relational_topic: str = ""
+        self._pending_relational: bool = False
+        self._load_state()
 
-    def set_mode(self, mode: PresenceMode):
+    def _load_state(self):
+        """Load persisted cooldown/dedup state."""
+        if self._state_path.exists():
+            try:
+                data = json.loads(self._state_path.read_text(encoding="utf-8"))
+                self._last_relational_time = data.get("last_relational_time", 0.0)
+                self._last_relational_topic = data.get("last_relational_topic", "")
+                logger.debug("Self-prompt state loaded")
+            except Exception as e:
+                logger.warning(f"Failed to load self-prompt state: {e}")
+
+    def _save_state(self):
+        """Persist cooldown/dedup state."""
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "last_relational_time": self._last_relational_time,
+                "last_relational_topic": self._last_relational_topic,
+            }
+            self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Failed to save self-prompt state: {e}")
+
+    def set_mode(self, mode: PresenceMode, presence_id: str = ""):
         """Switch between away and return mode."""
+        old_mode = self.mode
         self.mode = mode
-        logger.info(f"Self-prompt mode: {mode.value}")
+        logger.info(f"Self-prompt mode: {old_mode.value} → {mode.value}")
+
+        if mode == PresenceMode.RETURN and old_mode == PresenceMode.AWAY:
+            self.cancel_pending_relational(presence_id)
+
+    def cancel_pending_relational(self, presence_id: str = ""):
+        """Cancel pending relational outreach on return. Returns a cancellation intent."""
+        self._pending_relational = False
+        self._last_relational_time = time.time()
+        self._last_relational_topic = ""
+        self._save_state()
+        logger.info(f"Pending relational outreach cancelled (presence_id={presence_id})")
 
     async def select_intent(self, context: dict) -> list[Intent]:
         """Select intent(s) based on current mode and reconstructed context.
@@ -73,14 +115,14 @@ class SelfPromptEngine:
         return await self._return_intents(context)
 
     def _away_intents(self, context: dict) -> list[Intent]:
-        """In away mode, only high-significance events trigger intent.
-        Everything else is a deliberate no-op."""
+        """In away mode, only high-significance events trigger intent."""
         if self._check_significance_gate(context, 0.9):
             return [Intent(
                 action="log_observation",
                 reason="high-significance event during absence",
                 significance=0.9,
                 gate=OutreachGate.SIGNIFICANCE,
+                presence_id=context.get("presence_id", ""),
             )]
         return [Intent(
             action="noop",
@@ -89,31 +131,34 @@ class SelfPromptEngine:
             gate=OutreachGate.RELATIONAL,
             is_noop=True,
             noop_reason="away — silent observation",
+            presence_id=context.get("presence_id", ""),
         )]
 
     async def _return_intents(self, context: dict) -> list[Intent]:
         """In return mode, score context and select actionable intents."""
         intents = []
+        pid = context.get("presence_id", "")
 
-        # Check significance gate
         if self._check_significance_gate(context, self.config.significance_threshold):
             intents.append(Intent(
                 action="surface",
                 reason="high-significance context found",
                 significance=self._top_score(context),
                 gate=OutreachGate.SIGNIFICANCE,
+                presence_id=pid,
             ))
 
-        # Check relational gate
         if self._check_relational_gate(context):
+            self._pending_relational = True
             intents.append(Intent(
                 action="check_in",
                 reason="relational presence — gentle check-in",
                 significance=0.3,
                 gate=OutreachGate.RELATIONAL,
+                presence_id=pid,
             ))
+            self._save_state()
 
-        # If no actionable intents, return deliberate no-op
         if not intents:
             intents.append(Intent(
                 action="noop",
@@ -122,6 +167,7 @@ class SelfPromptEngine:
                 gate=OutreachGate.RELATIONAL,
                 is_noop=True,
                 noop_reason="all traces below both gates",
+                presence_id=pid,
             ))
 
         return intents[:self.config.max_intents_per_return]
@@ -136,18 +182,15 @@ class SelfPromptEngine:
         """Check relational gate: cooldown, dedup, quiet hours."""
         now = time.time()
 
-        # Quiet hours check
         hour = time.localtime(now).tm_hour
         if self.config.quiet_hours_start <= hour or hour < self.config.quiet_hours_end:
             logger.debug("Relational gate: quiet hours active")
             return False
 
-        # Cooldown check
         if now - self._last_relational_time < self.config.relational_cooldown_seconds:
             logger.debug("Relational gate: cooldown active")
             return False
 
-        # Dedup check (same topic within window)
         entities = context.get("active_entities", [])
         current_topic = " ".join(entities) if entities else "general"
         if (current_topic == self._last_relational_topic and

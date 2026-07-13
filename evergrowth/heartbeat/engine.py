@@ -8,6 +8,7 @@ import random
 import time
 
 from evergrowth.memory.capture_queue import CaptureQueueConsumer
+from evergrowth.selfprompt.engine import SelfPromptEngine, SelfPromptConfig, PresenceMode
 
 logger = logging.getLogger("evergrowth.heartbeat")
 
@@ -31,11 +32,13 @@ class HeartbeatEngine:
     The DI sets its own cadence — this engine just keeps the rhythm.
     """
 
-    def __init__(self, config, memory, identity, loop=None, capture_queue_path: str | None = None):
+    def __init__(self, config, memory, identity, loop=None, capture_queue_path: str | None = None,
+                 self_prompt: SelfPromptEngine | None = None):
         self.config = config
         self.memory = memory
         self.identity = identity
         self._loop = loop
+        self.self_prompt = self_prompt
 
         self.capture_consumer = None
         if capture_queue_path and memory:
@@ -295,6 +298,26 @@ class HeartbeatEngine:
                     parts.append(trace_ctx)
             except Exception as e:
                 self._log(f"Trace context generation failed: {e}")
+
+        # Self-prompt orchestration — select intent on first beat
+        if self._first_beat and self.self_prompt:
+            try:
+                context = {"active_patterns": [], "emotional_state": None}
+                if self.memory:
+                    ctx = await self.memory.reconstruct_context(limit=20)
+                    if ctx and "Summary:" in ctx:
+                        lines = ctx.split("\n")
+                        for line in lines:
+                            if line.startswith("Patterns:"):
+                                context["active_patterns"] = [p.strip() for p in line.split(":", 1)[1].split(",")]
+                            if line.startswith("Mood:"):
+                                context["emotional_state"] = line.split(":", 1)[1].strip()
+                intents = await self.self_prompt.select_intent(context)
+                for intent in intents:
+                    if not intent.is_noop:
+                        parts.append(f"[Intent] {intent.action}: {intent.reason}")
+            except Exception as e:
+                self._log(f"Self-prompt orchestration failed: {e}")
 
         # Header
         parts.append(f"{char} {timestamp}")
