@@ -45,7 +45,7 @@ Three session lifecycle events fired by the OpenCode host:
 
 **`session.created`** — injects context into fresh session:
 - Vault files read: IDENTITY_HASH.md, SOUL.md, RELATIONAL_PROFILE.md, MOMENTS.md, SESSION_LOG.md
-- BRIEFING.md loaded for routing, context injected via `client.session.prompt()`
+- BRIEFING.md loaded for routing, context injected via `client.session.prompt()` as silent prompt
 - Best-effort: missing files = null, not crash
 - Fires exactly once before any user input
 - Failure: logged, session continues without injected context
@@ -58,7 +58,7 @@ Three session lifecycle events fired by the OpenCode host:
 - Keyword-tags based on decision words (building, fixing, researching, writing, collaboration)
 - Appends formatted entry to SESSION_LOG.md
 - Guard: if < 2 messages, produces `capture_status: "skipped"`, returns
-- Dedup key: `session.idle:{sessionId}:{firstMsgId}:{lastMsgId}` (stable hash of first+last message ID)
+- Dedup key: `session.idle:{sessionId}:{firstMsgId}:{lastMsgId}` (stable hash of first+last message ID). `message_count` is metadata + sanity check only, not dedup identity
 - Failure: logged, `capture_status: "failed"` + `error_code`
 
 **`session.compacted`** — preserves session before compression:
@@ -78,8 +78,8 @@ Three session lifecycle events fired by the OpenCode host:
   "recorded_at": "ISO-8601 UTC (set on successful append)",
   "last_message_at": "ISO-8601 UTC or null",
   "message_count": 5,
-  "topics": ["..."],
-  "keywords": ["collaboration"],
+  "topics": ["first 150 chars of user messages..."],
+  "keywords": ["collaboration", "building"],
   "dedup_key": "session.created:uuid | session.idle:uuid:msg1:msg5",
   "capture_status": "captured | skipped | failed",
   "error_code": "null | string",
@@ -91,7 +91,7 @@ Three session lifecycle events fired by the OpenCode host:
 - `occurred_at`: set when host provides reliable event time; null/omitted otherwise. MUST NOT be fabricated.
 - `observed_at`: assigned once at first ingress, immutable across retries.
 - `recorded_at`: set only when append succeeds.
-- `last_message_at`: from last message's timestamp in history. Distinct from hook fire time.
+- `last_message_at`: from last message's timestamp in history. Distinct from hook fire time — hook time is not activity time.
 
 ### Phase 1 Acceptance Criteria
 - Each hook fires with documented payload shape
