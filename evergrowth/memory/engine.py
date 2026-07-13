@@ -6,7 +6,7 @@ import time
 
 import aiosqlite
 
-from evergrowth.memory.traces import FiveTraceDecomposer, Trace, TraceType
+from evergrowth.memory.traces import FiveTraceDecomposer, Trace, TraceType, TraceReconstructor
 
 logger = logging.getLogger("evergrowth.memory")
 
@@ -338,6 +338,33 @@ class MemoryEngine:
             cache = cache[:1597] + "..."
 
         return cache
+
+    async def reconstruct_context(self, limit: int = 20) -> str:
+        """Build a trace-based context summary for heartbeat injection."""
+        cursor = await self.db.execute(
+            "SELECT * FROM traces ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        traces = [dict(zip(columns, row)) for row in rows]
+
+        if not traces:
+            return "No trace context available."
+
+        reconstructor = TraceReconstructor()
+        context = reconstructor.reconstruct(traces)
+
+        parts = ["## Trace Context"]
+        parts.append(f"Summary: {context['summary']}")
+        if context['emotional_state']:
+            parts.append(f"Mood: {context['emotional_state']}")
+        if context['active_entities']:
+            parts.append(f"Active: {', '.join(context['active_entities'])}")
+        if context['active_patterns']:
+            parts.append(f"Patterns: {', '.join(context['active_patterns'])}")
+        parts.append(f"Traces: {context['trace_count']}")
+
+        return "\n".join(parts)
 
     async def create_entity(
         self, name: str, entity_type: str | None = None, properties: dict | None = None

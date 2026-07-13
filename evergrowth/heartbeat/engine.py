@@ -272,6 +272,14 @@ class HeartbeatEngine:
             except Exception as e:
                 self._log(f"Context cache generation failed: {e}")
 
+            # Trace context on first beat
+            try:
+                trace_ctx = await self.memory.reconstruct_context()
+                if trace_ctx and "No trace" not in trace_ctx:
+                    parts.append(trace_ctx)
+            except Exception as e:
+                self._log(f"Trace context generation failed: {e}")
+
         # Header
         parts.append(f"{char} {timestamp}")
 
