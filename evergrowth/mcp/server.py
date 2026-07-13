@@ -1,7 +1,9 @@
 """MCP server for Evergrowth — exposes DI capabilities to any AI."""
 
+import asyncio
 import json
 import logging
+import signal
 import time
 
 from mcp.server import Server
@@ -126,6 +128,11 @@ class EvergrowthMCPServer:
                     },
                     "required": ["event", "session_id"],
                 },
+            ),
+            Tool(
+                name="health_check",
+                description="Check if the MCP server is running and healthy",
+                inputSchema={"type": "object", "properties": {}},
             ),
             # Entity/Graph tools
             Tool(
@@ -352,6 +359,7 @@ class EvergrowthMCPServer:
                 "heartbeat_status": self._heartbeat_status,
                 "heartbeat_set_interval": self._heartbeat_set_interval,
                 "capture_submit": self._capture_submit,
+                "health_check": self._health_check,
                 "schedule_add": self._schedule_add,
                 "schedule_list": self._schedule_list,
                 "schedule_remove": self._schedule_remove,
@@ -446,22 +454,39 @@ class EvergrowthMCPServer:
 
     async def _capture_submit(self, args: dict) -> dict:
         """Handle capture_submit tool — decompose event into traces and store."""
-        event = {
-            "event": args.get("event", "session.idle"),
-            "session_id": args.get("session_id", ""),
-            "observed_at": args.get("observed_at"),
-            "last_message_at": args.get("last_message_at"),
-            "message_count": args.get("message_count", 0),
-            "topics": args.get("topics", []),
-            "keywords": args.get("keywords", []),
-            "dedup_key": args.get("dedup_key", ""),
-        }
-        traces = await self.memory.decompose_and_store(event)
-        return {
-            "status": "ok",
-            "traces_stored": len(traces),
-            "trace_types": [t["trace_type"] for t in traces],
-        }
+        try:
+            event = {
+                "event": args.get("event", "session.idle"),
+                "session_id": args.get("session_id", ""),
+                "observed_at": args.get("observed_at"),
+                "last_message_at": args.get("last_message_at"),
+                "message_count": args.get("message_count", 0),
+                "topics": args.get("topics", []),
+                "keywords": args.get("keywords", []),
+                "dedup_key": args.get("dedup_key", ""),
+            }
+            if not event["session_id"]:
+                return {"status": "error", "error": "session_id is required"}
+
+            traces = await self.memory.decompose_and_store(event)
+            return {
+                "status": "ok",
+                "traces_stored": len(traces),
+                "trace_types": [t["trace_type"] for t in traces],
+            }
+        except Exception as e:
+            logger.error(f"capture_submit failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+    async def _health_check(self, args: dict) -> dict:
+        """Health check — verify server is running and connected."""
+        status = {"status": "ok", "server": "evergrowth-mcp", "timestamp": time.time()}
+        if self.memory:
+            status["memory"] = "connected"
+        if self.heartbeat:
+            hb = self.heartbeat.get_status()
+            status["heartbeat"] = hb
+        return status
 
     # --- Entity/Graph handlers ---
 
@@ -574,14 +599,31 @@ class EvergrowthMCPServer:
         return {"status": "removed"}
 
     async def run_stdio(self):
-        """Run MCP server over stdio transport."""
+        """Run MCP server over stdio transport with signal handling."""
+        logger.info("Starting Evergrowth MCP server (stdio transport)...")
+
+        # Register signal handlers for graceful shutdown
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, lambda: asyncio.ensure_future(self.shutdown()))
+            except NotImplementedError:
+                pass  # Windows doesn't support add_signal_handler fully
+
         async with stdio_server() as (read_stream, write_stream):
+            logger.info("Evergrowth MCP server running on stdio")
             await self.server.run(
                 read_stream,
                 write_stream,
                 self.server.create_initialization_options(),
             )
+            logger.info("Evergrowth MCP server stopped")
 
     async def shutdown(self):
-        """Clean shutdown."""
-        logger.info("MCP server shutting down")
+        """Clean shutdown — save state, close connections."""
+        logger.info("MCP server shutting down...")
+        if self.memory:
+            await self.memory.close()
+        if self.heartbeat:
+            self.heartbeat.stop()
+        logger.info("MCP server shutdown complete")
