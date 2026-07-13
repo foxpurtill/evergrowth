@@ -215,3 +215,64 @@ class FiveTraceDecomposer(TraceDecomposer):
             if kw in pattern_map:
                 return pattern_map[kw]
         return None
+
+
+class TraceReconstructor:
+    """Reconstructs current context from stored traces.
+
+    Takes a set of traces and builds a coherent picture of the current
+    situation — not raw facts, but the shape of what's still relevant.
+    """
+
+    def reconstruct(self, traces: list[dict]) -> dict:
+        """Build a context summary from a list of trace dicts."""
+        if not traces:
+            return {"summary": "No context available", "active_patterns": [], "active_entities": []}
+
+        # Separate traces by type
+        by_type: dict[str, list[dict]] = {}
+        for t in traces:
+            by_type.setdefault(t["trace_type"], []).append(t)
+
+        # Build narrative from episodic traces
+        narrative_parts = []
+        for t in by_type.get("episodic", [])[-3:]:  # last 3
+            narrative_parts.append(t["summary"])
+
+        # Detect active emotional state
+        emotional_state = None
+        emotional_traces = by_type.get("emotional", [])
+        if emotional_traces:
+            latest = max(emotional_traces, key=lambda x: x.get("created_at", 0))
+            val = latest.get("emotional_valence")
+            if val is not None:
+                if val > 0.3:
+                    emotional_state = "positive"
+                elif val < -0.3:
+                    emotional_state = "challenging"
+                else:
+                    emotional_state = "neutral"
+
+        # Collect active entities
+        all_entities: set[str] = set()
+        for t in by_type.get("relational", []):
+            entities = t.get("entity_ids", [])
+            if isinstance(entities, str):
+                import json
+                entities = json.loads(entities)
+            all_entities.update(entities)
+
+        # Collect active patterns (last 5)
+        active_patterns = []
+        for t in by_type.get("schematic", [])[-5:]:
+            pid = t.get("pattern_id")
+            if pid and pid not in active_patterns:
+                active_patterns.append(pid)
+
+        return {
+            "summary": "; ".join(narrative_parts) if narrative_parts else "No recent activity",
+            "emotional_state": emotional_state,
+            "active_entities": sorted(all_entities),
+            "active_patterns": active_patterns,
+            "trace_count": len(traces),
+        }
