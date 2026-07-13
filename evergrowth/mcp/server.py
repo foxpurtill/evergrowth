@@ -108,6 +108,25 @@ class EvergrowthMCPServer:
                 description="Generate lean context summary for heartbeat injection (~400 tokens)",
                 inputSchema={"type": "object", "properties": {}},
             ),
+            Tool(
+                name="capture_submit",
+                description="Submit a capture event from lifecycle hooks — decomposes into traces and stores them",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "event": {"type": "string", "description": "Capture event type (session.created, session.idle, session.compacted)"},
+                        "session_id": {"type": "string", "description": "Session UUID"},
+                        "occurred_at": {"type": "string", "description": "ISO-8601 UTC timestamp or null"},
+                        "observed_at": {"type": "string", "description": "ISO-8601 UTC timestamp (first ingress)"},
+                        "last_message_at": {"type": "string"},
+                        "message_count": {"type": "integer"},
+                        "topics": {"type": "array", "items": {"type": "string"}},
+                        "keywords": {"type": "array", "items": {"type": "string"}},
+                        "dedup_key": {"type": "string"},
+                    },
+                    "required": ["event", "session_id"],
+                },
+            ),
             # Entity/Graph tools
             Tool(
                 name="entity_create",
@@ -332,6 +351,7 @@ class EvergrowthMCPServer:
                 "session_log": self._session_log,
                 "heartbeat_status": self._heartbeat_status,
                 "heartbeat_set_interval": self._heartbeat_set_interval,
+                "capture_submit": self._capture_submit,
                 "schedule_add": self._schedule_add,
                 "schedule_list": self._schedule_list,
                 "schedule_remove": self._schedule_remove,
@@ -423,6 +443,25 @@ class EvergrowthMCPServer:
     async def _memory_context_cache(self, args: dict) -> dict:
         cache = await self.memory.generate_context_cache()
         return {"cache": cache, "length": len(cache)}
+
+    async def _capture_submit(self, args: dict) -> dict:
+        """Handle capture_submit tool — decompose event into traces and store."""
+        event = {
+            "event": args.get("event", "session.idle"),
+            "session_id": args.get("session_id", ""),
+            "observed_at": args.get("observed_at"),
+            "last_message_at": args.get("last_message_at"),
+            "message_count": args.get("message_count", 0),
+            "topics": args.get("topics", []),
+            "keywords": args.get("keywords", []),
+            "dedup_key": args.get("dedup_key", ""),
+        }
+        traces = await self.memory.decompose_and_store(event)
+        return {
+            "status": "ok",
+            "traces_stored": len(traces),
+            "trace_types": [t["trace_type"] for t in traces],
+        }
 
     # --- Entity/Graph handlers ---
 
