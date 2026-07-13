@@ -109,7 +109,7 @@ Three session lifecycle events fired by the OpenCode host:
 ## 2. Trace Classification
 
 **Owner**: Lyra
-**Status**: Draft
+**Status**: Implemented (`evergrowth/memory/traces.py`)
 
 Five trace types decomposed from raw session events:
 
