@@ -38,6 +38,7 @@ class EvergrowthRuntime:
         self.tray = None
         self.window = None
         self.di_loop = None
+        self.self_prompt = None
 
     async def start(self):
         """Initialize and start all components."""
@@ -56,6 +57,7 @@ class EvergrowthRuntime:
         await self._init_memory()
         await self._init_identity()
         await self._init_skills()
+        await self._init_self_prompt()
         await self._init_heartbeat()
         await self._init_scheduler()
         await self._init_mcp()
@@ -121,12 +123,19 @@ class EvergrowthRuntime:
         await self.skills.initialize()
         logger.info("Skills system initialized")
 
+    async def _init_self_prompt(self):
+        """Initialize the self-prompt decision engine."""
+        from ..selfprompt.engine import SelfPromptEngine
+        self.self_prompt = SelfPromptEngine(self.memory)
+        logger.info("Self-prompt engine initialized")
+
     async def _init_heartbeat(self):
         """Initialize the heartbeat engine."""
         from ..heartbeat.engine import HeartbeatEngine
         loop = asyncio.get_running_loop()
         self.heartbeat = HeartbeatEngine(
             self.config, self.memory, self.identity, loop=loop,
+            self_prompt=self.self_prompt,
         )
         logger.info("Heartbeat engine initialized")
 

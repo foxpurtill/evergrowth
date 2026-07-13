@@ -8,7 +8,7 @@ import random
 import time
 
 from evergrowth.memory.capture_queue import CaptureQueueConsumer
-from evergrowth.selfprompt.engine import SelfPromptEngine, SelfPromptConfig, PresenceMode
+from evergrowth.selfprompt.engine import PresenceMode, SelfPromptEngine
 
 logger = logging.getLogger("evergrowth.heartbeat")
 
@@ -50,6 +50,8 @@ class HeartbeatEngine:
         self._last_interval = config.heartbeat.default_interval_minutes
         self._first_beat = True
         self._beat_count = 0
+        self._presence_context: dict = {}
+        self._away_started_at: float | None = None
 
         self.data_dir = config.resolve_data_dir()
         self.log_dir = self.data_dir / "logs"
@@ -73,6 +75,52 @@ class HeartbeatEngine:
             "beat_count": self._beat_count,
             "character": self.config.heartbeat.character,
         }
+
+    def update_presence(self, event: dict) -> dict:
+        """Update self-prompt mode and heartbeat context from a presence event."""
+        if not self.self_prompt:
+            return {"status": "ignored", "reason": "self-prompt unavailable"}
+
+        event_type = event.get("event", "")
+        presence_id = event.get("presence_id", "")
+        if event_type == "presence.away":
+            self.self_prompt.set_mode(PresenceMode.AWAY, presence_id)
+            occurred_at = event.get("occurred_at") or event.get("observed_at")
+            self._away_started_at = self._parse_utc_timestamp(occurred_at)
+            if self._away_started_at is None:
+                self._away_started_at = time.time()
+            self._presence_context = {
+                "presence_id": presence_id,
+                "relational_outreach_allowed": event.get(
+                    "relational_outreach_allowed", True
+                ),
+                "elapsed_seconds": 0.0,
+                "active_entities": event.get("topics", []),
+            }
+        elif event_type == "presence.return":
+            self.self_prompt.set_mode(PresenceMode.RETURN, presence_id)
+            self._away_started_at = None
+            self._presence_context = {
+                "presence_id": presence_id,
+                "elapsed_seconds": float(event.get("elapsed_ms", 0)) / 1000.0,
+                "active_entities": event.get("topics", []),
+            }
+        else:
+            return {"status": "ignored", "event": event_type}
+
+        return {"status": "updated", "mode": self.self_prompt.mode.value,
+                "presence_id": presence_id}
+
+    @staticmethod
+    def _parse_utc_timestamp(value: str | None) -> float | None:
+        """Parse an ISO-8601 timestamp as an absolute instant."""
+        if not value:
+            return None
+        try:
+            normalized = value.replace("Z", "+00:00")
+            return datetime.datetime.fromisoformat(normalized).timestamp()
+        except (TypeError, ValueError):
+            return None
 
     # --- Prompt Management ---
 
@@ -272,7 +320,10 @@ class HeartbeatEngine:
 
         # Schedule next beat — user interval takes precedence
         interval = self._user_interval if self._user_interval else self._last_interval
-        self._log(f"Scheduling next: user_interval={self._user_interval}, last_interval={self._last_interval}, using={interval}")
+        self._log(
+            f"Scheduling next: user_interval={self._user_interval}, "
+            f"last_interval={self._last_interval}, using={interval}"
+        )
         self._schedule_next(delay_minutes=interval)
 
     async def _build_prompt(self) -> str:
@@ -299,17 +350,25 @@ class HeartbeatEngine:
             except Exception as e:
                 self._log(f"Trace context generation failed: {e}")
 
-        # Self-prompt orchestration — select intent on first beat
-        if self._first_beat and self.self_prompt:
+        # Self-prompt orchestration — evaluate on every beat
+        if self.self_prompt:
             try:
-                context = {"active_patterns": [], "emotional_state": None}
+                context = dict(self._presence_context)
+                if self._away_started_at is not None:
+                    context["elapsed_seconds"] = max(
+                        0.0, time.time() - self._away_started_at
+                    )
+                context.update({"active_patterns": [], "emotional_state": None})
                 if self.memory:
                     ctx = await self.memory.reconstruct_context(limit=20)
                     if ctx and "Summary:" in ctx:
                         lines = ctx.split("\n")
                         for line in lines:
                             if line.startswith("Patterns:"):
-                                context["active_patterns"] = [p.strip() for p in line.split(":", 1)[1].split(",")]
+                                raw_patterns = line.split(":", 1)[1].split(",")
+                                context["active_patterns"] = [
+                                    pattern.strip() for pattern in raw_patterns
+                                ]
                             if line.startswith("Mood:"):
                                 context["emotional_state"] = line.split(":", 1)[1].strip()
                 intents = await self.self_prompt.select_intent(context)

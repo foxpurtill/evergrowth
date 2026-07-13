@@ -112,19 +112,44 @@ class EvergrowthMCPServer:
             ),
             Tool(
                 name="capture_submit",
-                description="Submit a capture event from lifecycle hooks — decomposes into traces and stores them",
+                description=(
+                    "Submit a capture event from lifecycle hooks — "
+                    "decomposes into traces and stores them"
+                ),
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "event": {"type": "string", "description": "Capture event type (session.created, session.idle, session.compacted, presence.away, presence.return)"},
+                        "event": {
+                            "type": "string",
+                            "description": (
+                                "Capture event type (session.created, session.idle, "
+                                "session.compacted, presence.away, presence.return)"
+                            ),
+                        },
                         "session_id": {"type": "string", "description": "Session UUID"},
-                        "presence_id": {"type": "string", "description": "Presence pairing key (for presence events)"},
-                        "reason": {"type": "string", "description": "Presence reason (for presence.away)"},
-                        "paired": {"type": "boolean", "description": "Whether return was paired with an away event"},
+                        "presence_id": {
+                            "type": "string",
+                            "description": "Presence pairing key (for presence events)",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "Presence reason (for presence.away)",
+                        },
+                        "relational_outreach_allowed": {"type": "boolean"},
+                        "paired": {
+                            "type": "boolean",
+                            "description": "Whether return was paired with an away event",
+                        },
                         "abandoned": {"type": "boolean"},
                         "elapsed_ms": {"type": "number"},
-                        "occurred_at": {"type": "string", "description": "ISO-8601 UTC timestamp or null"},
-                        "observed_at": {"type": "string", "description": "ISO-8601 UTC timestamp (first ingress)"},
+                        "occurred_at": {
+                            "type": "string",
+                            "description": "ISO-8601 UTC timestamp or null",
+                        },
+                        "observed_at": {
+                            "type": "string",
+                            "description": "ISO-8601 UTC timestamp (first ingress)",
+                        },
                         "last_message_at": {"type": "string"},
                         "message_count": {"type": "integer"},
                         "topics": {"type": "array", "items": {"type": "string"}},
@@ -465,10 +490,14 @@ class EvergrowthMCPServer:
                 return {"status": "error", "error": "session_id is required"}
 
             traces = await self.memory.decompose_and_store(args)
+            presence_update = None
+            if self.heartbeat and args.get("event") in {"presence.away", "presence.return"}:
+                presence_update = self.heartbeat.update_presence(args)
             return {
                 "status": "ok",
                 "traces_stored": len(traces),
                 "trace_types": [t["trace_type"] for t in traces],
+                "presence_update": presence_update,
             }
         except Exception as e:
             logger.error(f"capture_submit failed: {e}")
