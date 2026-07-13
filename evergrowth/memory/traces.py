@@ -96,6 +96,12 @@ class FiveTraceDecomposer(TraceDecomposer):
         ts = event.get("observed_at", time.time())
         source_id = event.get("dedup_key", event.get("session_id", "unknown"))
         session_id = event.get("session_id", source_id)
+
+        # Presence events have their own decomposition path
+        event_type = event.get("event", "")
+        if event_type in ("presence.away", "presence.return"):
+            return self._decompose_presence(event, ts, source_id, event_type)
+
         traces = []
 
         # 1. Episodic — what happened
@@ -153,6 +159,39 @@ class FiveTraceDecomposer(TraceDecomposer):
             ))
 
         return traces
+
+    def _decompose_presence(self, event: dict, ts: float, source_id: str,
+                             event_type: str) -> list[Trace]:
+        """Decompose a presence.away or presence.return event."""
+        presence_id = event.get("presence_id", "")
+        reason = event.get("reason", "")
+        is_away = event_type == "presence.away"
+        label = "went away" if is_away else "returned"
+        extra = f" ({reason})" if reason else ""
+
+        return [
+            Trace(
+                trace_type=TraceType.EPISODIC,
+                timestamp=ts,
+                source_event_id=source_id,
+                summary=f"Presence {label}{extra}",
+                decay_curve=DecayCurve.FAST,
+            ),
+            Trace(
+                trace_type=TraceType.RELATIONAL,
+                timestamp=ts,
+                source_event_id=source_id,
+                summary=f"Self: {label}{extra}",
+                decay_curve=DecayCurve.SLOW,
+            ),
+            Trace(
+                trace_type=TraceType.TEMPORAL,
+                timestamp=ts,
+                source_event_id=source_id,
+                summary=f"Presence event at session time",
+                decay_curve=DecayCurve.MEDIUM,
+            ),
+        ]
 
     def _extract_narrative(self, event: dict) -> str:
         """Extract a short narrative summary from the event."""
