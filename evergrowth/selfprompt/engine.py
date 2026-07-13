@@ -12,10 +12,9 @@ Two outreach gates:
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("evergrowth.selfprompt")
 
@@ -48,6 +47,7 @@ class SelfPromptConfig:
     significance_threshold: float = 0.7
     relational_cooldown_seconds: float = 300.0
     relational_dedup_window: float = 3600.0
+    relational_min_away_seconds: float = 1800.0
     quiet_hours_start: int = 22
     quiet_hours_end: int = 7
     max_intents_per_return: int = 3
@@ -57,14 +57,17 @@ class SelfPromptConfig:
 class SelfPromptEngine:
     """Decides what the DI should do next based on presence mode and context."""
 
-    def __init__(self, memory, config: Optional[SelfPromptConfig] = None):
+    def __init__(self, memory, config: SelfPromptConfig | None = None):
         self.memory = memory
         self.config = config or SelfPromptConfig()
         self.mode = PresenceMode.RETURN
-        self._state_path = Path(self.config.state_path or "~/.evergrowth/selfprompt_state.json").expanduser()
+        self._state_path = Path(
+            self.config.state_path or "~/.evergrowth/selfprompt_state.json"
+        ).expanduser()
         self._last_relational_time: float = 0.0
         self._last_relational_topic: str = ""
         self._pending_relational: bool = False
+        self._relational_presence_ids: set[str] = set()
         self._load_state()
 
     def _load_state(self):
@@ -74,6 +77,7 @@ class SelfPromptEngine:
                 data = json.loads(self._state_path.read_text(encoding="utf-8"))
                 self._last_relational_time = data.get("last_relational_time", 0.0)
                 self._last_relational_topic = data.get("last_relational_topic", "")
+                self._relational_presence_ids = set(data.get("relational_presence_ids", []))
                 logger.debug("Self-prompt state loaded")
             except Exception as e:
                 logger.warning(f"Failed to load self-prompt state: {e}")
@@ -85,6 +89,7 @@ class SelfPromptEngine:
             data = {
                 "last_relational_time": self._last_relational_time,
                 "last_relational_topic": self._last_relational_topic,
+                "relational_presence_ids": sorted(self._relational_presence_ids),
             }
             self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
@@ -102,8 +107,6 @@ class SelfPromptEngine:
     def cancel_pending_relational(self, presence_id: str = ""):
         """Cancel pending relational outreach on return. Returns a cancellation intent."""
         self._pending_relational = False
-        self._last_relational_time = time.time()
-        self._last_relational_topic = ""
         self._save_state()
         logger.info(f"Pending relational outreach cancelled (presence_id={presence_id})")
 
@@ -115,23 +118,41 @@ class SelfPromptEngine:
         return await self._return_intents(context)
 
     def _away_intents(self, context: dict) -> list[Intent]:
-        """In away mode, only high-significance events trigger intent."""
+        """In away mode, permit significant alerts or one policy-approved check-in."""
+        pid = context.get("presence_id", "")
         if self._check_significance_gate(context, 0.9):
             return [Intent(
-                action="log_observation",
+                action="surface",
                 reason="high-significance event during absence",
                 significance=0.9,
                 gate=OutreachGate.SIGNIFICANCE,
-                presence_id=context.get("presence_id", ""),
+                presence_id=pid,
             )]
+
+        relational_allowed = bool(context.get("relational_outreach_allowed", False))
+        elapsed = float(context.get("elapsed_seconds", 0.0) or 0.0)
+        if (relational_allowed and pid and pid not in self._relational_presence_ids
+                and elapsed >= self.config.relational_min_away_seconds
+                and self._check_relational_gate(context)):
+            self._pending_relational = True
+            self._relational_presence_ids.add(pid)
+            self._save_state()
+            return [Intent(
+                action="check_in",
+                reason="ordinary relational presence during an established absence",
+                significance=0.3,
+                gate=OutreachGate.RELATIONAL,
+                presence_id=pid,
+            )]
+
         return [Intent(
             action="noop",
-            reason="away mode — no significant events",
+            reason="away mode ? no gate passed",
             significance=0.0,
             gate=OutreachGate.RELATIONAL,
             is_noop=True,
-            noop_reason="away — silent observation",
-            presence_id=context.get("presence_id", ""),
+            noop_reason="away ? deliberate silence",
+            presence_id=pid,
         )]
 
     async def _return_intents(self, context: dict) -> list[Intent]:
