@@ -14,7 +14,8 @@
     "db_path": "~/.evergrowth/memory.db",
     "session_summary_threshold": 1000,
     "auto_promote_session": true,
-    "max_context_cache_tokens": 400
+    "max_context_cache_tokens": 400,
+    "capture_queue_path": ""
   },
   "skills": {
     "skills_path": "~/.evergrowth/skills",
