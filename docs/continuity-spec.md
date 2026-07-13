@@ -283,9 +283,9 @@ The DI decides what to do between sessions without being told. Presence tells us
 Two modes — away and return — switched by presence events.
 
 **Away Mode** (trigger: `presence.away`):
-1. Reduce heartbeat frequency (away mode, not ignored)
-2. Log quiet observations without surfacing
-3. Suppress outreach — no prompts, no chatter
+1. Log quiet observations without surfacing
+2. Suppress outreach by default (configurable via policy)
+3. Heartbeat frequency adapts based on no-op gate, not fixed reduction
 4. On `presence.return`, merge reflection traces back into continuity
 
 **Return Mode** (trigger: `presence.return`):
