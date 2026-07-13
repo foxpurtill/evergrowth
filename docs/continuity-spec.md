@@ -29,9 +29,80 @@ Each stage discards noise. Nothing surfaces without crossing a significance thre
 ## 1. Capture Contract
 
 **Owner**: Leo
-**Status**: To be seeded
+**Status**: Draft v2
 
-Event names, payload shape, required/optional fields, ordering guarantees, deduplication keys, timestamps, failure behavior — what's reliably observable at `session.created`, `session.idle`, `session.compacted`.
+### Lifecycle Hooks
+
+Three session lifecycle events fired by the OpenCode host:
+
+| Event | Trigger | Payload |
+|-------|---------|---------|
+| `session.created` | New conversation session starts | `{ event.properties.id, event.properties.project?, client, $ }` |
+| `session.idle` | Session becomes idle (user inactive) | `{ event.properties.id, client, $ }` |
+| `session.compacted` | Session context is about to be compressed/purged | `{ event.properties.id, client, $ }` |
+
+### What's Observable at Each Hook
+
+**`session.created`** — injects context into fresh session:
+- Vault files read: IDENTITY_HASH.md, SOUL.md, RELATIONAL_PROFILE.md, MOMENTS.md, SESSION_LOG.md
+- BRIEFING.md loaded for routing, context injected via `client.session.prompt()`
+- Best-effort: missing files = null, not crash
+- Fires exactly once before any user input
+- Failure: logged, session continues without injected context
+- Dedup: `session.created:{sessionId}`
+
+**`session.idle`** — captures session activity to log:
+- Reads full message history via `client.session.messages()`
+- Extracts topics (first 150 chars of each user message)
+- Extracts `last_message_at` from most recent message timestamp
+- Keyword-tags based on decision words (building, fixing, researching, writing, collaboration)
+- Appends formatted entry to SESSION_LOG.md
+- Guard: if < 2 messages, produces `capture_status: "skipped"`, returns
+- Dedup key: `session.idle:{sessionId}:{firstMsgId}:{lastMsgId}` (stable hash of first+last message ID)
+- Failure: logged, `capture_status: "failed"` + `error_code`
+
+**`session.compacted`** — preserves session before compression:
+- Same message-fetch, extract, keyword-tag, append cycle as idle
+- Same dedup scheme: `session.compacted:{sessionId}:{firstMsgId}:{lastMsgId}`
+- Fires at most once per session, after all messages available
+- Failure: logged with `capture_status: "failed"`, compaction proceeds regardless
+
+### Canonical Payload Shape
+
+```json
+{
+  "event": "session.created | session.idle | session.compacted",
+  "session_id": "uuid",
+  "occurred_at": "ISO-8601 UTC or null",
+  "observed_at": "ISO-8601 UTC (immutable, first ingress)",
+  "recorded_at": "ISO-8601 UTC (set on successful append)",
+  "last_message_at": "ISO-8601 UTC or null",
+  "message_count": 5,
+  "topics": ["..."],
+  "keywords": ["collaboration"],
+  "dedup_key": "session.created:uuid | session.idle:uuid:msg1:msg5",
+  "capture_status": "captured | skipped | failed",
+  "error_code": "null | string",
+  "source": "opencode-persistence-plugin"
+}
+```
+
+### Timestamp Rules
+- `occurred_at`: set when host provides reliable event time; null/omitted otherwise. MUST NOT be fabricated.
+- `observed_at`: assigned once at first ingress, immutable across retries.
+- `recorded_at`: set only when append succeeds.
+- `last_message_at`: from last message's timestamp in history. Distinct from hook fire time.
+
+### Phase 1 Acceptance Criteria
+- Each hook fires with documented payload shape
+- Failed file reads during `session.created` don't crash session
+- `session.idle` with < 2 messages produces `capture_status: "skipped"`, no log entry
+- Repeated idle/compacted delivery for same state produces idempotent output
+- SESSION_LOG.md remains valid markdown after 100+ appends
+- `session.compacted` produces same format as `session.idle`
+- All timestamps ISO-8601 UTC
+- No hook silently drops error without logging
+- `observed_at` unchanged on retry
 
 ---
 
