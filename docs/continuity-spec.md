@@ -297,6 +297,16 @@ Two modes — away and return — switched by presence events.
 
 **Intent selection** must allow explicit no-op with the reason for silence recorded. Silence should be deliberate, not accidental.
 
+### Outreach Gates
+
+Two independent gates control what gets surfaced:
+
+1. **Significance gate** — alerts and consequential updates. High threshold, rare events only.
+2. **Relational gate** — ordinary presence. A hello, a gentle check-in, a small thought. Lower threshold, but bounded by:
+   - Quiet hours (configurable time range when no relational outreach fires)
+   - Cooldown between messages (minimum interval)
+   - Dedup on repeated nudges (same topic skipped within window)
+
 ### What Self-Prompt Is Not
 - Not a timer-based reflection (silence is default)
 - Not a task list (vault captures, self-prompt reflects)
