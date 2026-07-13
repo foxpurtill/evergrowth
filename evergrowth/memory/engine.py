@@ -6,6 +6,8 @@ import time
 
 import aiosqlite
 
+from evergrowth.memory.traces import FiveTraceDecomposer, Trace, TraceType
+
 logger = logging.getLogger("evergrowth.memory")
 
 
@@ -120,6 +122,25 @@ class MemoryEngine:
             )
         """)
 
+        # Create traces table for decomposed session events
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS traces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trace_type TEXT NOT NULL,
+                source_memory_id INTEGER,
+                source_session_id TEXT,
+                summary TEXT NOT NULL,
+                significance REAL DEFAULT 0.0,
+                decay_curve TEXT DEFAULT 'medium',
+                dedup_key TEXT UNIQUE,
+                emotional_valence REAL,
+                entity_ids TEXT DEFAULT '[]',
+                pattern_id TEXT,
+                created_at REAL NOT NULL,
+                FOREIGN KEY (source_memory_id) REFERENCES memories(id)
+            )
+        """)
+
         await self.db.commit()
         logger.info(f"Memory engine initialized at {self.db_path}")
 
@@ -152,6 +173,73 @@ class MemoryEngine:
         memory_id = cursor.lastrowid
         logger.debug(f"Stored memory {memory_id}: {content[:50]}...")
         return memory_id
+
+    async def store_trace(self, trace: Trace) -> int | None:
+        """Store a single decomposed trace. Returns trace ID or None if duplicate."""
+        try:
+            cursor = await self.db.execute(
+                """
+                INSERT OR IGNORE INTO traces
+                    (trace_type, source_memory_id, source_session_id, summary,
+                     significance, decay_curve, dedup_key, emotional_valence,
+                     entity_ids, pattern_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    trace.trace_type.value,
+                    None,
+                    trace.source_event_id,
+                    trace.summary,
+                    trace.significance,
+                    trace.decay_curve.value,
+                    trace.dedup_key,
+                    trace.emotional_valence,
+                    json.dumps(trace.entity_ids),
+                    trace.pattern_id,
+                    trace.timestamp,
+                ),
+            )
+            await self.db.commit()
+            if cursor.rowcount == 0:
+                logger.debug(f"Dedup'd trace: {trace.dedup_key}")
+                return None
+            return cursor.lastrowid
+        except Exception as e:
+            logger.warning(f"Failed to store trace: {e}")
+            return None
+
+    async def decompose_and_store(self, event: dict) -> list[dict]:
+        """Decompose a session event into traces and store them.
+        Returns list of stored trace dicts."""
+        decomposer = FiveTraceDecomposer()
+        traces = decomposer.decompose(event)
+        session_id = event.get("session_id")
+        stored = []
+        for trace in traces:
+            if session_id:
+                trace.source_event_id = session_id
+            trace_id = await self.store_trace(trace)
+            if trace_id is not None:
+                stored.append(trace.to_dict())
+        logger.info(f"Decomposed event into {len(stored)} traces ({len(traces) - len(stored)} dedup'd)")
+        return stored
+
+    async def get_traces_by_session(self, session_id: str,
+                                      trace_type: str | None = None) -> list[dict]:
+        """Retrieve traces for a session, optionally filtered by type."""
+        if trace_type:
+            cursor = await self.db.execute(
+                "SELECT * FROM traces WHERE source_session_id = ? AND trace_type = ? ORDER BY created_at",
+                (session_id, trace_type),
+            )
+        else:
+            cursor = await self.db.execute(
+                "SELECT * FROM traces WHERE source_session_id = ? ORDER BY created_at",
+                (session_id,),
+            )
+        rows = await cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        return [dict(zip(columns, row)) for row in rows]
 
     async def search(
         self,

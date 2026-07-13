@@ -95,6 +95,7 @@ class FiveTraceDecomposer(TraceDecomposer):
     def decompose(self, event: dict) -> list[Trace]:
         ts = event.get("observed_at", time.time())
         source_id = event.get("dedup_key", event.get("session_id", "unknown"))
+        session_id = event.get("session_id", source_id)
         traces = []
 
         # 1. Episodic — what happened
@@ -123,7 +124,7 @@ class FiveTraceDecomposer(TraceDecomposer):
             trace_type=TraceType.TEMPORAL,
             timestamp=ts,
             source_event_id=source_id,
-            summary=f"Event observed at {ts}",
+            summary=f"Event observed at session time",
             decay_curve=DecayCurve.FAST,
         ))
 
