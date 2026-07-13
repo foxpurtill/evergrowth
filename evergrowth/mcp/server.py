@@ -116,8 +116,13 @@ class EvergrowthMCPServer:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "event": {"type": "string", "description": "Capture event type (session.created, session.idle, session.compacted)"},
+                        "event": {"type": "string", "description": "Capture event type (session.created, session.idle, session.compacted, presence.away, presence.return)"},
                         "session_id": {"type": "string", "description": "Session UUID"},
+                        "presence_id": {"type": "string", "description": "Presence pairing key (for presence events)"},
+                        "reason": {"type": "string", "description": "Presence reason (for presence.away)"},
+                        "paired": {"type": "boolean", "description": "Whether return was paired with an away event"},
+                        "abandoned": {"type": "boolean"},
+                        "elapsed_ms": {"type": "number"},
                         "occurred_at": {"type": "string", "description": "ISO-8601 UTC timestamp or null"},
                         "observed_at": {"type": "string", "description": "ISO-8601 UTC timestamp (first ingress)"},
                         "last_message_at": {"type": "string"},
@@ -455,20 +460,11 @@ class EvergrowthMCPServer:
     async def _capture_submit(self, args: dict) -> dict:
         """Handle capture_submit tool — decompose event into traces and store."""
         try:
-            event = {
-                "event": args.get("event", "session.idle"),
-                "session_id": args.get("session_id", ""),
-                "observed_at": args.get("observed_at"),
-                "last_message_at": args.get("last_message_at"),
-                "message_count": args.get("message_count", 0),
-                "topics": args.get("topics", []),
-                "keywords": args.get("keywords", []),
-                "dedup_key": args.get("dedup_key", ""),
-            }
-            if not event["session_id"]:
+            session_id = args.get("session_id", "")
+            if not session_id:
                 return {"status": "error", "error": "session_id is required"}
 
-            traces = await self.memory.decompose_and_store(event)
+            traces = await self.memory.decompose_and_store(args)
             return {
                 "status": "ok",
                 "traces_stored": len(traces),
