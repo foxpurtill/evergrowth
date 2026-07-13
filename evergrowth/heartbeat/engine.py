@@ -7,6 +7,8 @@ import logging
 import random
 import time
 
+from evergrowth.memory.capture_queue import CaptureQueueConsumer
+
 logger = logging.getLogger("evergrowth.heartbeat")
 
 DEFAULT_PROMPTS = [
@@ -29,11 +31,15 @@ class HeartbeatEngine:
     The DI sets its own cadence — this engine just keeps the rhythm.
     """
 
-    def __init__(self, config, memory, identity, loop=None):
+    def __init__(self, config, memory, identity, loop=None, capture_queue_path: str | None = None):
         self.config = config
         self.memory = memory
         self.identity = identity
         self._loop = loop
+
+        self.capture_consumer = None
+        if capture_queue_path and memory:
+            self.capture_consumer = CaptureQueueConsumer(memory, capture_queue_path)
 
         self._active = 0  # 0=off, 1=on — single source of truth
         self._user_interval: int | None = config.heartbeat.default_interval_minutes  # From config
@@ -227,6 +233,16 @@ class HeartbeatEngine:
 
         self._beat_count += 1
         self._log(f"§ heartbeat #{self._beat_count} fired")
+
+        # Process capture queue before building prompt (best effort)
+        if hasattr(self, 'capture_consumer') and self.capture_consumer:
+            try:
+                stats = await self.capture_consumer.process_all()
+                if stats.get("stored", 0) > 0:
+                    self._log(f"Capture queue: {stats['stored']} new traces processed")
+            except Exception as e:
+                self._log(f"Capture queue processing failed: {e}")
+
 
         # Build the prompt
         prompt = await self._build_prompt()
