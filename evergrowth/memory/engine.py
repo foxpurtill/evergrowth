@@ -6,7 +6,8 @@ import time
 
 import aiosqlite
 
-from evergrowth.memory.traces import FiveTraceDecomposer, Trace, TraceType, TraceReconstructor
+from evergrowth.memory.time_state import TimeStateScorer
+from evergrowth.memory.traces import FiveTraceDecomposer, Trace, TraceReconstructor
 
 logger = logging.getLogger("evergrowth.memory")
 
@@ -221,7 +222,10 @@ class MemoryEngine:
             trace_id = await self.store_trace(trace)
             if trace_id is not None:
                 stored.append(trace.to_dict())
-        logger.info(f"Decomposed event into {len(stored)} traces ({len(traces) - len(stored)} dedup'd)")
+        logger.info(
+            f"Decomposed event into {len(stored)} traces "
+            f"({len(traces) - len(stored)} dedup'd)"
+        )
         return stored
 
     async def get_traces_by_session(self, session_id: str,
@@ -229,7 +233,8 @@ class MemoryEngine:
         """Retrieve traces for a session, optionally filtered by type."""
         if trace_type:
             cursor = await self.db.execute(
-                "SELECT * FROM traces WHERE source_session_id = ? AND trace_type = ? ORDER BY created_at",
+                "SELECT * FROM traces WHERE source_session_id = ? "
+                "AND trace_type = ? ORDER BY created_at",
                 (session_id, trace_type),
             )
         else:
@@ -342,7 +347,7 @@ class MemoryEngine:
     async def reconstruct_context(self, limit: int = 20) -> str:
         """Build a trace-based context summary for heartbeat injection."""
         cursor = await self.db.execute(
-            "SELECT * FROM traces ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM traces ORDER BY created_at DESC"
         )
         rows = await cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
@@ -351,8 +356,13 @@ class MemoryEngine:
         if not traces:
             return "No trace context available."
 
+        ranked = TimeStateScorer().score_many(traces)[:limit]
+        ranked.sort(key=lambda trace: trace.get("created_at", 0))
         reconstructor = TraceReconstructor()
-        context = reconstructor.reconstruct(traces)
+        context = reconstructor.reconstruct(ranked)
+        context["top_relevance"] = max(
+            trace["time_state"]["score"] for trace in ranked
+        )
 
         parts = ["## Trace Context"]
         parts.append(f"Summary: {context['summary']}")
@@ -363,6 +373,7 @@ class MemoryEngine:
         if context['active_patterns']:
             parts.append(f"Patterns: {', '.join(context['active_patterns'])}")
         parts.append(f"Traces: {context['trace_count']}")
+        parts.append(f"Top relevance: {context['top_relevance']:.2f}")
 
         return "\n".join(parts)
 
