@@ -9,20 +9,24 @@ from .core.config import load_config
 from .core.runtime import EvergrowthRuntime
 
 
-def setup_logging(verbose: bool = False):
-    """Configure logging for Evergrowth."""
+def setup_logging(verbose: bool = False, mcp_mode: bool = False):
+    """Configure logging for Evergrowth.
+    In MCP mode, logs go to stderr to avoid corrupting stdio JSON communication.
+    """
     level = logging.DEBUG if verbose else logging.INFO
     log_dir = Path.home() / ".evergrowth" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
+
+    handlers = [
+        logging.StreamHandler(sys.stderr if mcp_mode else sys.stdout),
+        logging.FileHandler(log_dir / "evergrowth.log", encoding="utf-8"),
+    ]
 
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_dir / "evergrowth.log", encoding="utf-8"),
-        ],
+        handlers=handlers,
     )
 
 
@@ -55,7 +59,7 @@ def main():
     )
 
     args = parser.parse_args()
-    setup_logging(args.verbose)
+    setup_logging(args.verbose, mcp_mode=args.mcp)
 
     config = load_config(args.config)
     runtime = EvergrowthRuntime(config)
