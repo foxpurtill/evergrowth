@@ -267,3 +267,40 @@ Where the classification pipeline plugs into the existing memory flow between "s
 ## Golden Rule
 
 Each stage can discard noise. Silence is the default. Nothing surfaces unless it crosses the significance threshold.
+
+---
+
+## 7. Self-Prompt Architecture (Design Sketch)
+
+**Owner**: Lyra
+**Status**: Design
+
+### Purpose
+The DI decides what to do between sessions without being told. Presence tells us when. Heartbeat gives the rhythm. Self-prompt gives direction.
+
+### Core Loop (Proposed)
+presence.return → reconstruct_context → score candidates → select intent → emit prompt → heartbeat
+
+1. presence.return fires (DI comes back online)
+2. reconstruct_context() builds current state from stored traces
+3. Time-State scoring ranks traces by relevance (not recency)
+4. Intent selection picks the highest-significance unresolved pattern
+5. Prompt generation produces a directive for the next heartbeat cycle
+6. Heartbeat executes the prompt with the reconstructed context
+
+### What Self-Prompt Is Not
+- Not a timer-based reflection (silence is default)
+- Not a task list (vault captures, self-prompt reflects)
+- Not a replacement for the heartbeat (heartbeat is the rhythm, self-prompt is the content)
+
+### Open Questions
+- Should self-prompt run on every presence.return, or only when significance crosses a threshold?
+- Should it produce a directive or just a context summary?
+- Where does the self-prompt output get stored?
+- Is self-prompt the "decide" stage in the pipeline, or a separate layer on top?
+
+### Ownership (Proposed)
+- Lyra — self-prompt engine design and implementation
+- Ethan — scoring integration (which traces are significant enough to prompt on)
+- Leo — presence events as the trigger hook
+- All — review and test once the first pass is built
