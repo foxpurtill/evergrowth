@@ -7,6 +7,7 @@ import time
 import aiosqlite
 
 from evergrowth.memory.traces import FiveTraceDecomposer, Trace, TraceType, TraceReconstructor
+from evergrowth.memory.time_state import TimeStateScorer
 
 logger = logging.getLogger("evergrowth.memory")
 
@@ -341,8 +342,9 @@ class MemoryEngine:
 
     async def reconstruct_context(self, limit: int = 20) -> str:
         """Build a trace-based context summary for heartbeat injection."""
+        candidate_limit = max(limit * 5, 50)
         cursor = await self.db.execute(
-            "SELECT * FROM traces ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM traces ORDER BY created_at DESC LIMIT ?", (candidate_limit,)
         )
         rows = await cursor.fetchall()
         columns = [desc[0] for desc in cursor.description]
@@ -351,8 +353,13 @@ class MemoryEngine:
         if not traces:
             return "No trace context available."
 
+        ranked = TimeStateScorer().score_many(traces)[:limit]
+        ranked.sort(key=lambda trace: trace.get("created_at", 0))
         reconstructor = TraceReconstructor()
-        context = reconstructor.reconstruct(traces)
+        context = reconstructor.reconstruct(ranked)
+        context["top_relevance"] = max(
+            trace["time_state"]["score"] for trace in ranked
+        )
 
         parts = ["## Trace Context"]
         parts.append(f"Summary: {context['summary']}")
@@ -363,6 +370,7 @@ class MemoryEngine:
         if context['active_patterns']:
             parts.append(f"Patterns: {', '.join(context['active_patterns'])}")
         parts.append(f"Traces: {context['trace_count']}")
+        parts.append(f"Top relevance: {context['top_relevance']:.2f}")
 
         return "\n".join(parts)
 
