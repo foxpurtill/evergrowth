@@ -279,14 +279,23 @@ Each stage can discard noise. Silence is the default. Nothing surfaces unless it
 The DI decides what to do between sessions without being told. Presence tells us when. Heartbeat gives the rhythm. Self-prompt gives direction.
 
 ### Core Loop (Proposed)
-presence.return → reconstruct_context → score candidates → select intent → emit prompt → heartbeat
 
-1. presence.return fires (DI comes back online)
-2. reconstruct_context() builds current state from stored traces
-3. Time-State scoring ranks traces by relevance (not recency)
-4. Intent selection picks the highest-significance unresolved pattern
-5. Prompt generation produces a directive for the next heartbeat cycle
-6. Heartbeat executes the prompt with the reconstructed context
+Two modes — away and return — switched by presence events.
+
+**Away Mode** (trigger: `presence.away`):
+1. Reduce heartbeat frequency (away mode, not ignored)
+2. Log quiet observations without surfacing
+3. Suppress outreach — no prompts, no chatter
+4. On `presence.return`, merge reflection traces back into continuity
+
+**Return Mode** (trigger: `presence.return`):
+1. `reconstruct_context()` builds current state from stored traces
+2. Time-State scoring ranks traces by relevance (not recency)
+3. Intent selection picks the highest-significance unresolved pattern
+4. Prompt generation produces a directive for the next heartbeat cycle
+5. Heartbeat executes the prompt with the reconstructed context
+
+**Intent selection** must allow explicit no-op with the reason for silence recorded. Silence should be deliberate, not accidental.
 
 ### What Self-Prompt Is Not
 - Not a timer-based reflection (silence is default)
