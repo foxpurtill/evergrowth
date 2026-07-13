@@ -120,3 +120,57 @@ async def test_capture_submit_updates_presence_after_storage():
     assert result["status"] == "ok"
     assert result["traces_stored"] == 1
     assert result["presence_update"]["presence_id"] == "presence-3"
+
+
+@pytest.mark.asyncio
+async def test_presence_state_survives_engine_restart(tmp_path, monkeypatch):
+    started = time.time() - 1900
+    occurred_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started))
+    first_prompt = RecordingSelfPrompt()
+    first = HeartbeatEngine(
+        heartbeat_config(tmp_path), MemoryStub(), None, self_prompt=first_prompt
+    )
+    first.update_presence({
+        "event": "presence.away",
+        "presence_id": "presence-persisted",
+        "occurred_at": occurred_at,
+        "relational_outreach_allowed": True,
+    })
+
+    second_prompt = RecordingSelfPrompt()
+    second = HeartbeatEngine(
+        heartbeat_config(tmp_path), MemoryStub(), None, self_prompt=second_prompt
+    )
+    monkeypatch.setattr(time, "time", lambda: started + 1900)
+    decision = await second.evaluate_self_prompt()
+
+    assert second_prompt.mode == PresenceMode.AWAY
+    assert decision["presence_id"] == "presence-persisted"
+    assert decision["elapsed_seconds"] == pytest.approx(1900, abs=1.0)
+    assert second_prompt.contexts[-1]["relational_outreach_allowed"] is True
+
+
+@pytest.mark.asyncio
+async def test_mcp_heartbeat_evaluate_returns_engine_decision():
+    class EvaluatingHeartbeat:
+        async def evaluate_self_prompt(self):
+            return {
+                "status": "ok",
+                "mode": "away",
+                "presence_id": "presence-4",
+                "intents": [{"action": "check_in", "is_noop": False}],
+            }
+
+    server = EvergrowthMCPServer(
+        config=None,
+        memory=None,
+        skills=None,
+        identity=None,
+        heartbeat=EvaluatingHeartbeat(),
+    )
+
+    result = await server._heartbeat_evaluate({})
+
+    assert result["status"] == "ok"
+    assert result["mode"] == "away"
+    assert result["intents"][0]["action"] == "check_in"

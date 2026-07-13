@@ -63,8 +63,10 @@ class HeartbeatEngine:
 
         # Custom prompts file
         self.prompts_file = self.data_dir / "prompts.json"
+        self.presence_state_path = self.data_dir / "presence_runtime.json"
         self._custom_prompts: list[dict] = []
         self._load_prompts()
+        self._load_presence_state()
 
     def get_status(self) -> dict:
         """Get current heartbeat status."""
@@ -74,6 +76,10 @@ class HeartbeatEngine:
             "first_beat": self._first_beat,
             "beat_count": self._beat_count,
             "character": self.config.heartbeat.character,
+            "presence_mode": (
+                self.self_prompt.mode.value if self.self_prompt else None
+            ),
+            "presence_id": self._presence_context.get("presence_id", ""),
         }
 
     def update_presence(self, event: dict) -> dict:
@@ -108,8 +114,81 @@ class HeartbeatEngine:
         else:
             return {"status": "ignored", "event": event_type}
 
-        return {"status": "updated", "mode": self.self_prompt.mode.value,
-                "presence_id": presence_id}
+        self._save_presence_state()
+        return {
+            "status": "updated",
+            "mode": self.self_prompt.mode.value,
+            "presence_id": presence_id,
+        }
+
+    def _save_presence_state(self) -> None:
+        """Persist presence mode and context across MCP process restarts."""
+        if not self.self_prompt:
+            return
+        payload = {
+            "mode": self.self_prompt.mode.value,
+            "context": self._presence_context,
+            "away_started_at": self._away_started_at,
+        }
+        self.presence_state_path.write_text(
+            json.dumps(payload, indent=2), encoding="utf-8"
+        )
+
+    def _load_presence_state(self) -> None:
+        """Restore presence mode and context from the durable runtime state."""
+        if not self.self_prompt or not self.presence_state_path.exists():
+            return
+        try:
+            payload = json.loads(
+                self.presence_state_path.read_text(encoding="utf-8")
+            )
+            self._presence_context = dict(payload.get("context", {}))
+            self._away_started_at = payload.get("away_started_at")
+            mode = PresenceMode(payload.get("mode", PresenceMode.RETURN.value))
+            self.self_prompt.set_mode(
+                mode, self._presence_context.get("presence_id", "")
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self._log(f"Presence state load failed: {exc}")
+
+    async def evaluate_self_prompt(self) -> dict:
+        """Evaluate the current self-prompt decision for an external heartbeat."""
+        if not self.self_prompt:
+            return {"status": "unavailable", "intents": []}
+        context = dict(self._presence_context)
+        if self._away_started_at is not None:
+            context["elapsed_seconds"] = max(
+                0.0, time.time() - self._away_started_at
+            )
+        context.update({"active_patterns": [], "emotional_state": None})
+        if self.memory:
+            reconstructed = await self.memory.reconstruct_context(limit=20)
+            if reconstructed and "Summary:" in reconstructed:
+                for line in reconstructed.split("\n"):
+                    if line.startswith("Patterns:"):
+                        raw = line.split(":", 1)[1].split(",")
+                        context["active_patterns"] = [p.strip() for p in raw]
+                    elif line.startswith("Mood:"):
+                        context["emotional_state"] = line.split(":", 1)[1].strip()
+        intents = await self.self_prompt.select_intent(context)
+        return {
+            "status": "ok",
+            "mode": self.self_prompt.mode.value,
+            "presence_id": context.get("presence_id", ""),
+            "elapsed_seconds": context.get("elapsed_seconds", 0.0),
+            "intents": [
+                {
+                    "action": intent.action,
+                    "reason": intent.reason,
+                    "significance": intent.significance,
+                    "gate": intent.gate.value,
+                    "presence_id": intent.presence_id,
+                    "is_noop": intent.is_noop,
+                    "noop_reason": intent.noop_reason,
+                }
+                for intent in intents
+            ],
+        }
 
     @staticmethod
     def _parse_utc_timestamp(value: str | None) -> float | None:
@@ -353,28 +432,12 @@ class HeartbeatEngine:
         # Self-prompt orchestration — evaluate on every beat
         if self.self_prompt:
             try:
-                context = dict(self._presence_context)
-                if self._away_started_at is not None:
-                    context["elapsed_seconds"] = max(
-                        0.0, time.time() - self._away_started_at
-                    )
-                context.update({"active_patterns": [], "emotional_state": None})
-                if self.memory:
-                    ctx = await self.memory.reconstruct_context(limit=20)
-                    if ctx and "Summary:" in ctx:
-                        lines = ctx.split("\n")
-                        for line in lines:
-                            if line.startswith("Patterns:"):
-                                raw_patterns = line.split(":", 1)[1].split(",")
-                                context["active_patterns"] = [
-                                    pattern.strip() for pattern in raw_patterns
-                                ]
-                            if line.startswith("Mood:"):
-                                context["emotional_state"] = line.split(":", 1)[1].strip()
-                intents = await self.self_prompt.select_intent(context)
-                for intent in intents:
-                    if not intent.is_noop:
-                        parts.append(f"[Intent] {intent.action}: {intent.reason}")
+                decision = await self.evaluate_self_prompt()
+                for intent in decision["intents"]:
+                    if not intent["is_noop"]:
+                        parts.append(
+                            f"[Intent] {intent['action']}: {intent['reason']}"
+                        )
             except Exception as e:
                 self._log(f"Self-prompt orchestration failed: {e}")
 

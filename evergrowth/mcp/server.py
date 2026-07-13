@@ -282,6 +282,11 @@ class EvergrowthMCPServer:
                 inputSchema={"type": "object", "properties": {}},
             ),
             Tool(
+                name="heartbeat_evaluate",
+                description="Evaluate Evergrowth's current heartbeat intent",
+                inputSchema={"type": "object", "properties": {}},
+            ),
+            Tool(
                 name="heartbeat_set_interval",
                 description="Set next heartbeat interval in minutes",
                 inputSchema={
@@ -387,6 +392,7 @@ class EvergrowthMCPServer:
                 "identity_set_mood": self._identity_set_mood,
                 "session_log": self._session_log,
                 "heartbeat_status": self._heartbeat_status,
+                "heartbeat_evaluate": self._heartbeat_evaluate,
                 "heartbeat_set_interval": self._heartbeat_set_interval,
                 "capture_submit": self._capture_submit,
                 "health_check": self._health_check,
@@ -576,6 +582,9 @@ class EvergrowthMCPServer:
 
     async def _heartbeat_status(self, args: dict) -> dict:
         return self.heartbeat.get_status()
+
+    async def _heartbeat_evaluate(self, args: dict) -> dict:
+        return await self.heartbeat.evaluate_self_prompt()
 
     async def _heartbeat_set_interval(self, args: dict) -> dict:
         self.heartbeat.set_next_interval(args["minutes"])
