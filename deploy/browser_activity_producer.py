@@ -1,4 +1,4 @@
-"""Publish recent foreground ChatGPT browser activity for presence detection."""
+"""Record activity only while the target ChatGPT conversation is foreground."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from pathlib import Path
 
 DEFAULT_OUTPUT = Path(r"C:\Users\susur\.evergrowth\browser_activity.json")
 BROWSER_PROCESSES = {"chrome.exe", "msedge.exe", "firefox.exe", "brave.exe"}
+DEFAULT_TITLE_SUBSTRING = "Browser Presence Detection"
 
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -55,14 +56,24 @@ def is_chatgpt_window(
     title: str,
     idle_seconds: float,
     max_idle_seconds: float,
+    title_substring: str,
 ) -> bool:
-    del title
-    return process in BROWSER_PROCESSES and idle_seconds <= max_idle_seconds
+    return (
+        process in BROWSER_PROCESSES
+        and title_substring.lower() in title.lower()
+        and idle_seconds <= max_idle_seconds
+    )
 
 
-def is_chatgpt_active(max_idle_seconds: float) -> bool:
+def is_chatgpt_active(max_idle_seconds: float, title_substring: str) -> bool:
     process, title = foreground_window()
-    return is_chatgpt_window(process, title, input_idle_seconds(), max_idle_seconds)
+    return is_chatgpt_window(
+        process,
+        title,
+        input_idle_seconds(),
+        max_idle_seconds,
+        title_substring,
+    )
 
 
 def write_activity(path: Path, session_id: str) -> None:
@@ -76,9 +87,15 @@ def write_activity(path: Path, session_id: str) -> None:
     temporary.replace(path)
 
 
-def run(output: Path, session_id: str, poll_seconds: float, max_idle_seconds: float) -> None:
+def run(
+    output: Path,
+    session_id: str,
+    poll_seconds: float,
+    max_idle_seconds: float,
+    title_substring: str,
+) -> None:
     while True:
-        if is_chatgpt_active(max_idle_seconds):
+        if is_chatgpt_active(max_idle_seconds, title_substring):
             write_activity(output, session_id)
         time.sleep(poll_seconds)
 
@@ -89,8 +106,15 @@ def main() -> None:
     parser.add_argument("--session-id", default="browser:chatgpt")
     parser.add_argument("--poll-seconds", type=float, default=5.0)
     parser.add_argument("--max-idle-seconds", type=float, default=60.0)
+    parser.add_argument("--title-substring", default=DEFAULT_TITLE_SUBSTRING)
     args = parser.parse_args()
-    run(args.output, args.session_id, args.poll_seconds, args.max_idle_seconds)
+    run(
+        args.output,
+        args.session_id,
+        args.poll_seconds,
+        args.max_idle_seconds,
+        args.title_substring,
+    )
 
 
 if __name__ == "__main__":
