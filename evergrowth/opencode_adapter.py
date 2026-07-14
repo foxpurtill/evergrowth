@@ -65,6 +65,7 @@ class OpenCodeSessionAdapter:
         return {
             "event": event_type,
             "source": SOURCE,
+            "source_session_id": self._current_session_id,
             "schema_version": SCHEMA_VERSION,
             "source_system_version": SOURCE_VERSION,
             "occurred_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
