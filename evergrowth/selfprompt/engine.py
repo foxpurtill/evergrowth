@@ -47,7 +47,7 @@ class SelfPromptConfig:
     significance_threshold: float = 0.7
     relational_cooldown_seconds: float = 300.0
     relational_dedup_window: float = 3600.0
-    relational_min_away_seconds: float = 600.0
+    relational_min_away_seconds: float = 1800.0
     quiet_hours_start: int = 22
     quiet_hours_end: int = 7
     max_intents_per_return: int = 3
