@@ -275,6 +275,8 @@ A common event envelope so both platforms (ChatGPT-sensor and OpenCode-sensor) p
 |-------|------|-------------|
 | `event` | string | Event type (presence.away, presence.return, watcher.health, watcher.calendar) |
 | `source` | string | Producer identifier (chatgpt-tab, opencode-session, system-health) |
+| `schema_version` | string | Contract version (e.g. "1.0") |
+| `source_system_version` | string | Producer's own version |
 | `occurred_at` | string | ISO-8601 UTC |
 | `severity` | float | 0.0–1.0 significance score |
 | `presence_id` | string | Continuity pairing key |
