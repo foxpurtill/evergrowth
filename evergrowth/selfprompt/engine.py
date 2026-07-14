@@ -124,7 +124,7 @@ class SelfPromptEngine:
         elapsed = float(context.get("elapsed_seconds", 0.0) or 0.0)
         if (relational_allowed and pid and pid not in self._relational_presence_ids
                 and elapsed >= self.config.relational_min_away_seconds
-                and self._check_relational_gate(context)):
+                and self._check_away_relational_gate()):
             self._pending_relational = True
             self._relational_presence_ids.add(pid)
             self._save_state()
@@ -198,6 +198,18 @@ class SelfPromptEngine:
         patterns = context.get("active_patterns", [])
         emotional = context.get("emotional_state")
         return len(patterns) > 1 or emotional in ("challenging", "positive")
+
+    def _check_away_relational_gate(self) -> bool:
+        """Check only quiet hours and cooldown for a new absence."""
+        now = time.time()
+        hour = time.localtime(now).tm_hour
+        if self.config.quiet_hours_start <= hour or hour < self.config.quiet_hours_end:
+            return False
+        if now - self._last_relational_time < self.config.relational_cooldown_seconds:
+            return False
+        self._last_relational_time = now
+        self._last_relational_topic = "absence"
+        return True
 
     def _check_relational_gate(self, context: dict) -> bool:
         """Check relational gate: cooldown, dedup, quiet hours."""

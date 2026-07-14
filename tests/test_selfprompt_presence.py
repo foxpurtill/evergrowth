@@ -67,3 +67,25 @@ def test_return_cancels_pending_without_fabricating_new_cooldown(tmp_path):
     engine.set_mode(PresenceMode.RETURN, "p3")
     assert engine._pending_relational is False
     assert engine._last_relational_time == before
+
+
+def test_new_absence_ignores_cross_topic_dedup(tmp_path):
+    engine = make_engine(tmp_path)
+    engine._last_relational_time = 1000.0
+    engine._last_relational_topic = "general"
+    engine._save_state()
+
+    import evergrowth.selfprompt.engine as module
+    original = module.time.time
+    module.time.time = lambda: 1401.0
+    try:
+        intents = run(engine.select_intent({
+            "presence_id": "new-absence",
+            "elapsed_seconds": 1900,
+            "relational_outreach_allowed": True,
+            "active_patterns": ["one", "two"],
+        }))
+    finally:
+        module.time.time = original
+
+    assert intents[0].action == "check_in"
