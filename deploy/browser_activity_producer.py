@@ -50,9 +50,22 @@ def input_idle_seconds() -> float:
     return max(0.0, (kernel32.GetTickCount64() - info.dwTime) / 1000.0)
 
 
+def is_chatgpt_window(
+    process: str,
+    title: str,
+    idle_seconds: float,
+    max_idle_seconds: float,
+) -> bool:
+    return (
+        process in BROWSER_PROCESSES
+        and "chatgpt" in title.lower()
+        and idle_seconds <= max_idle_seconds
+    )
+
+
 def is_chatgpt_active(max_idle_seconds: float) -> bool:
-    process, _title = foreground_window()
-    return process in BROWSER_PROCESSES and input_idle_seconds() <= max_idle_seconds
+    process, title = foreground_window()
+    return is_chatgpt_window(process, title, input_idle_seconds(), max_idle_seconds)
 
 
 def write_activity(path: Path, session_id: str) -> None:

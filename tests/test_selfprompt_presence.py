@@ -48,6 +48,19 @@ def test_away_relational_sends_once_per_presence_id_and_persists(tmp_path):
     assert third[0].is_noop
 
 
+def test_away_relational_is_not_starved_by_significance(tmp_path):
+    engine = make_engine(tmp_path)
+    intents = run(engine.select_intent({
+        "presence_id": "p-significant",
+        "elapsed_seconds": 1900,
+        "relational_outreach_allowed": True,
+        "active_patterns": ["one", "two"],
+    }))
+
+    assert intents[0].action == "check_in"
+    assert intents[0].gate.value == "relational"
+
+
 def test_return_cancels_pending_without_fabricating_new_cooldown(tmp_path):
     engine = make_engine(tmp_path)
     before = engine._last_relational_time

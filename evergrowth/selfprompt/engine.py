@@ -120,15 +120,6 @@ class SelfPromptEngine:
     def _away_intents(self, context: dict) -> list[Intent]:
         """In away mode, permit significant alerts or one policy-approved check-in."""
         pid = context.get("presence_id", "")
-        if self._check_significance_gate(context, 0.9):
-            return [Intent(
-                action="surface",
-                reason="high-significance event during absence",
-                significance=0.9,
-                gate=OutreachGate.SIGNIFICANCE,
-                presence_id=pid,
-            )]
-
         relational_allowed = bool(context.get("relational_outreach_allowed", False))
         elapsed = float(context.get("elapsed_seconds", 0.0) or 0.0)
         if (relational_allowed and pid and pid not in self._relational_presence_ids
@@ -142,6 +133,15 @@ class SelfPromptEngine:
                 reason="ordinary relational presence during an established absence",
                 significance=0.3,
                 gate=OutreachGate.RELATIONAL,
+                presence_id=pid,
+            )]
+
+        if self._check_significance_gate(context, 0.9):
+            return [Intent(
+                action="surface",
+                reason="high-significance event during absence",
+                significance=0.9,
+                gate=OutreachGate.SIGNIFICANCE,
                 presence_id=pid,
             )]
 
