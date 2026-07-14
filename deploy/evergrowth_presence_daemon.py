@@ -33,7 +33,7 @@ def parse_handoff() -> dict:
         if ":" not in raw:
             continue
         key, value = raw.split(":", 1)
-        data[key.strip().lower().replace("-", "_")] = value.strip()
+        data[key.strip().lower().replace("-", "_").replace(" ", "_")] = value.strip()
     return data
 
 
@@ -52,6 +52,21 @@ def iso_to_epoch(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
+def extract_mcp_payload(body: dict) -> dict:
+    structured = body.get("structuredContent")
+    if isinstance(structured, dict):
+        return structured
+    for item in body.get("content", []):
+        text = item.get("text", "").strip()
+        if not text:
+            continue
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logging.error("Non-JSON MCP text payload: %r; body=%r", text, body)
+    raise RuntimeError(f"Evergrowth MCP returned no JSON payload: {body!r}")
+
+
 async def mcp_call(tool: str, arguments: dict) -> dict:
     proc = await asyncio.create_subprocess_exec(
         str(PYTHON), "-m", "evergrowth", "--mcp", "--config", str(CONFIG),
@@ -67,10 +82,13 @@ async def mcp_call(tool: str, arguments: dict) -> dict:
         await proc.stdin.drain()
 
     async def recv(timeout: float = 15.0) -> dict:
-        raw = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
-        if not raw:
-            raise RuntimeError("Evergrowth MCP closed without a response")
-        return json.loads(raw.decode("utf-8", errors="replace"))
+        while True:
+            raw = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
+            if not raw:
+                raise RuntimeError("Evergrowth MCP closed without a response")
+            text = raw.decode("utf-8", errors="replace").strip()
+            if text:
+                return json.loads(text)
 
     try:
         await send({
@@ -97,9 +115,7 @@ async def mcp_call(tool: str, arguments: dict) -> dict:
         result = await recv()
         if result.get("error"):
             raise RuntimeError(str(result["error"]))
-        content = result.get("result", {}).get("content", [])
-        text = content[0].get("text", "{}") if content else "{}"
-        return json.loads(text)
+        return extract_mcp_payload(result.get("result", {}))
     finally:
         proc.terminate()
         try:
@@ -118,7 +134,7 @@ def build_event(handoff: dict) -> dict:
             "session_id": session_id,
             "presence_id": presence_id,
             "occurred_at": handoff.get("left_at_baseline"),
-            "reason": handoff.get("reason") or None,
+            "reason": handoff.get("reason", ""),
             "relational_outreach_allowed": handoff.get(
                 "relational_outreach_allowed", "true"
             ).lower() == "true",
