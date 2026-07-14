@@ -164,6 +164,11 @@ class EvergrowthMCPServer:
                 description="Check if the MCP server is running and healthy",
                 inputSchema={"type": "object", "properties": {}},
             ),
+            Tool(
+                name="selfprompt_status",
+                description="Get the current self-prompt engine status — mode, last intent, gates",
+                inputSchema={"type": "object", "properties": {}},
+            ),
             # Entity/Graph tools
             Tool(
                 name="entity_create",
@@ -390,6 +395,7 @@ class EvergrowthMCPServer:
                 "heartbeat_set_interval": self._heartbeat_set_interval,
                 "capture_submit": self._capture_submit,
                 "health_check": self._health_check,
+                "selfprompt_status": self._selfprompt_status,
                 "schedule_add": self._schedule_add,
                 "schedule_list": self._schedule_list,
                 "schedule_remove": self._schedule_remove,
@@ -512,6 +518,20 @@ class EvergrowthMCPServer:
             hb = self.heartbeat.get_status()
             status["heartbeat"] = hb
         return status
+
+    async def _selfprompt_status(self, args: dict) -> dict:
+        """Return self-prompt engine status from the heartbeat."""
+        if not self.heartbeat or not self.heartbeat.self_prompt:
+            return {"status": "unavailable", "reason": "self-prompt engine not initialized"}
+
+        sp = self.heartbeat.self_prompt
+        return {
+            "mode": sp.mode.value,
+            "last_relational_time": sp._last_relational_time,
+            "last_relational_topic": sp._last_relational_topic,
+            "pending_relational": sp._pending_relational,
+            "state_path": str(sp._state_path),
+        }
 
     # --- Entity/Graph handlers ---
 
