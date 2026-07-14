@@ -1,6 +1,7 @@
 """Regression tests for the deployed presence bridge daemon."""
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -60,3 +61,54 @@ def test_extract_mcp_payload_skips_non_json_text_blocks():
 def test_extract_mcp_payload_rejects_missing_json():
     with pytest.raises(RuntimeError, match="no JSON payload"):
         daemon.extract_mcp_payload({"content": [{"text": "plain text only"}]})
+
+
+def test_build_return_conversation_captures_visible_channel_messages(
+    tmp_path, monkeypatch
+):
+    transcript = tmp_path / "telegram.jsonl"
+    transcript.write_text(
+        json.dumps({
+            "type": "message",
+            "message": {
+                "role": "user",
+                "content": "I'm back soon",
+                "timestamp": 3000,
+                "senderId": "patricia",
+                "sourceChannel": "telegram",
+            },
+        })
+        + "\n"
+        + json.dumps({
+            "type": "message",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I'll be here"}],
+                "timestamp": 4000,
+            },
+        }),
+        encoding="utf-8",
+    )
+    index = tmp_path / "sessions.json"
+    index.write_text(
+        json.dumps({daemon.TELEGRAM_SESSION_KEY: {"sessionFile": str(transcript)}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(daemon, "SESSIONS_INDEX", index)
+
+    event = daemon.build_return_conversation(
+        {
+            "left_at_baseline": "1970-01-01T00:00:02Z",
+            "returned_at": "1970-01-01T00:00:05Z",
+        },
+        {
+            "event": "presence.return",
+            "session_id": "session-1",
+            "presence_id": "presence-1",
+        },
+    )
+
+    assert event["event"] == "conversation.bridge"
+    assert event["dedup_key"] == "conversation.bridge:presence-1"
+    assert len(event["messages"]) == 2
+    assert "Patricia: I'm back soon" in event["topics"][0]

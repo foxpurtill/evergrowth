@@ -4,8 +4,19 @@ import asyncio
 import json
 import logging
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
+
+DEPLOY_DIR = Path(__file__).resolve().parent
+if str(DEPLOY_DIR) not in sys.path:
+    sys.path.insert(0, str(DEPLOY_DIR))
+
+from openclaw_transcript import (  # noqa: E402
+    build_briefing,
+    extract_conversation,
+    resolve_session_transcript,
+)
 
 ROOT = Path(r"C:\Users\susur\Ethan\evergrowth-main-runtime")
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -14,7 +25,12 @@ HANDOFF = Path(r"C:\Users\susur\.openclaw\workspace\PRESENCE_HANDOFF.md")
 STATE = Path(r"C:\Users\susur\.evergrowth\presence_bridge_state.json")
 LOG = Path(r"C:\Users\susur\.evergrowth\logs\presence_bridge.log")
 OPENCLAW = Path(r"C:\Users\susur\AppData\Roaming\npm\openclaw.cmd")
+SESSIONS_INDEX = Path(
+    r"C:\Users\susur\.openclaw\agents\main\sessions\sessions.json"
+)
+RETURN_BRIEFING = Path(r"C:\Users\susur\.evergrowth\return_briefing.json")
 TELEGRAM_TARGET = "7932972485"
+TELEGRAM_SESSION_KEY = f"agent:main:telegram:direct:{TELEGRAM_TARGET}"
 POLL_SECONDS = 30
 
 LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -158,6 +174,35 @@ def build_event(handoff: dict) -> dict:
     return {}
 
 
+def build_return_conversation(handoff: dict, event: dict) -> dict:
+    """Build one provider-neutral capture event for channel activity while away."""
+    started_at = handoff.get("left_at_baseline")
+    ended_at = handoff.get("returned_at")
+    if event.get("event") != "presence.return" or not started_at or not ended_at:
+        return {}
+    transcript = resolve_session_transcript(SESSIONS_INDEX, TELEGRAM_SESSION_KEY)
+    if transcript is None:
+        return {}
+    messages = extract_conversation(
+        transcript,
+        started_at=started_at,
+        ended_at=ended_at,
+    )
+    briefing = build_briefing(messages)
+    if not briefing:
+        return {}
+    return {
+        "event": "conversation.bridge",
+        "session_id": event.get("session_id", ""),
+        "presence_id": event.get("presence_id", ""),
+        "channel": "telegram",
+        "topics": [briefing],
+        "keywords": ["patricia", "ethan", "telegram", "continuity"],
+        "messages": messages,
+        "dedup_key": f"conversation.bridge:{event.get('presence_id', '')}",
+    }
+
+
 def deliver_check_in(decision: dict) -> None:
     presence_id = decision.get("presence_id", "")
     elapsed = int(decision.get("elapsed_seconds", 0))
@@ -185,6 +230,29 @@ async def run_once() -> None:
         return
 
     state = load_state()
+    conversation = build_return_conversation(handoff, event)
+    if conversation:
+        conversation_key = conversation["dedup_key"]
+        if state.get("conversation_key") != conversation_key:
+            conversation_result = await mcp_call("capture_submit", conversation)
+            if conversation_result.get("status") != "ok":
+                raise RuntimeError(f"conversation capture failed: {conversation_result}")
+            briefing_payload = {
+                "presence_id": event.get("presence_id", ""),
+                "created_at": datetime.now().astimezone().isoformat(),
+                "briefing": conversation["topics"][0],
+                "messages": conversation["messages"],
+            }
+            RETURN_BRIEFING.write_text(
+                json.dumps(briefing_payload, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            state["conversation_key"] = conversation_key
+            state["last_conversation_capture"] = conversation_result
+            state["return_briefing"] = str(RETURN_BRIEFING)
+            save_state(state)
+            logging.info("Captured return conversation for %s", event["presence_id"])
+
     sync_key = f"{event['event']}:{event['presence_id']}"
     if state.get("sync_key") != sync_key:
         result = await mcp_call("capture_submit", event)
