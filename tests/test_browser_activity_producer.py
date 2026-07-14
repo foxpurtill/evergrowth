@@ -16,9 +16,9 @@ def test_chatgpt_browser_window_counts_as_activity():
     )
 
 
-def test_other_browser_tab_does_not_count_as_chatgpt_activity():
+def test_non_browser_application_does_not_count_as_chatgpt_activity():
     assert not producer.is_chatgpt_window(
-        "chrome.exe", "Telegram Web", idle_seconds=3, max_idle_seconds=60
+        "telegram.exe", "Telegram", idle_seconds=3, max_idle_seconds=60
     )
 
 

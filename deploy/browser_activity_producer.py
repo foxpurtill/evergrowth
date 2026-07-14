@@ -56,11 +56,8 @@ def is_chatgpt_window(
     idle_seconds: float,
     max_idle_seconds: float,
 ) -> bool:
-    return (
-        process in BROWSER_PROCESSES
-        and "chatgpt" in title.lower()
-        and idle_seconds <= max_idle_seconds
-    )
+    del title
+    return process in BROWSER_PROCESSES and idle_seconds <= max_idle_seconds
 
 
 def is_chatgpt_active(max_idle_seconds: float) -> bool:
