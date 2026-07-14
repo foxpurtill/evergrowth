@@ -257,10 +257,37 @@ Threshold logic. Which traces cross from storage into the context cache. Silence
 
 ## 6. Evergrowth Insertion Points
 
-**Owner**: All
-**Status**: To be filled after code review
+**Owner**: Lyra
+**Status**: Implemented (`evergrowth/selfprompt/engine.py`)
 
-Where the classification pipeline plugs into the existing memory flow between "session memory created" and "context cache regenerated."
+---
+
+## 8. Shared Event Contract
+
+**Owner**: All
+**Status**: Proposed
+
+### Purpose
+A common event envelope so both platforms (ChatGPT-sensor and OpenCode-sensor) produce and consume the same signal without forking.
+
+### Minimum Fields
+| Field | Type | Description |
+|-------|------|-------------|
+| `event` | string | Event type (presence.away, presence.return, watcher.health, watcher.calendar) |
+| `source` | string | Producer identifier (chatgpt-tab, opencode-session, system-health) |
+| `occurred_at` | string | ISO-8601 UTC |
+| `severity` | float | 0.0–1.0 significance score |
+| `presence_id` | string | Continuity pairing key |
+| `dedup_key` | string | Idempotency (same key = no duplicate) |
+| `summary` | string | User-facing one-line description |
+| `action` | string | Recommended action or intent |
+
+### Watcher Progression
+1. **System health** — presence worker, heartbeat, delivery bridge, capture pipeline
+2. **Calendar urgency** — upcoming events, deadlines
+3. **Priority email** — filtered notifications
+
+Each watcher class validated independently before the next is added.
 
 ---
 
