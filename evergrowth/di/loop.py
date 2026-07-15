@@ -224,21 +224,18 @@ class DILoop:
         # Add response to history
         self._history.append({"role": "assistant", "content": response})
 
-        # Speak the response
-        speak(response)
-
         # Parse next interval
         next_interval = self._parse_next_interval(response)
         logger.info(f"Next interval: {next_interval} minutes")
 
-        # Store in memory
+        # Critical path — run before non-critical TTS
         await self._store_response(response)
-
-        # Write prompt plan
         self._write_plan(response)
-
-        # Signal heartbeat
+        self._write_brief(response)
         self._signal_heartbeat(next_interval)
+
+        # Non-critical: speak the response
+        speak(response)
 
     def _parse_next_interval(self, text: str) -> int:
         """Extract next:N from response text."""
@@ -298,6 +295,38 @@ class DILoop:
             logger.info("Prompt plan written")
         except Exception as e:
             logger.error(f"Failed to write plan: {e}")
+
+    def _write_brief(self, response: str):
+        """Write a freeform brief to the vault for session start."""
+        vault = self.config.resolve_vault_path()
+        if not vault:
+            logger.debug("No vault path configured — skipping brief")
+            return
+
+        lines = response.strip().splitlines()
+        clean = [
+            line for line in lines
+            if not line.strip().lower().startswith("next:")
+        ]
+        body = "\n".join(clean).strip()
+        if not body:
+            return
+
+        import datetime as dt
+        now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+        brief = (
+            f"# Autonomous Brief — {now}\n\n"
+            f"{body}\n"
+        )
+
+        brief_dir = vault / "Session"
+        try:
+            brief_dir.mkdir(parents=True, exist_ok=True)
+            (brief_dir / "Autonomous-Brief.md").write_text(brief, encoding="utf-8")
+            logger.info("Brief written to vault Session/Autonomous-Brief.md")
+        except Exception as e:
+            logger.error(f"Failed to write vault brief: {e}")
 
     def _signal_heartbeat(self, next_interval: int):
         """Signal the heartbeat with the next interval."""
