@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from evergrowth.memory.engine import MemoryEngine
-from evergrowth.selfprompt.engine import SelfPromptEngine
+from evergrowth.selfprompt.engine import SelfPromptEngine, SelfPromptConfig, PresenceMode
 from evergrowth.skills.registry import SkillRegistry
 from foxpur.evergrowth.autonomous_brain import AutonomousBrain
 
@@ -60,9 +60,11 @@ class AutonomousIntegration:
         """Initialize all components for autonomous operation."""
         try:
             # Initialize self-prompt engine
+            from evergrowth.selfprompt.engine import SelfPromptConfig
+            sp_config = SelfPromptConfig()
             self.selfprompt = SelfPromptEngine(
-                memory=None,  # Will be set when memory is initialized
-                config=self.config
+                memory=None,
+                config=sp_config,
             )
 
             # Create other components as needed

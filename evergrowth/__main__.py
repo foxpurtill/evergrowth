@@ -74,6 +74,8 @@ def main():
     config = load_config(args.config)
     runtime = EvergrowthRuntime(config)
 
+    logger = logging.getLogger("evergrowth.runtime")
+
     async def _initialize_autonomous_integration(runtime, config):
         """Initialize autonomous integration if enabled."""
         try:
