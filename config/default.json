@@ -8,7 +8,12 @@
     "character": "§",
     "response_timeout_seconds": 480,
     "initial_delay_minutes": 1,
-    "prompt_variations": []
+    "prompt_variations": [],
+    "discord_watch": {
+      "enabled": false,
+      "bot_token": "",
+      "guild_id": ""
+    }
   },
   "memory": {
     "db_path": "~/.evergrowth/memory.db",
