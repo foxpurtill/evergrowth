@@ -39,6 +39,7 @@ class EvergrowthRuntime:
         self.window = None
         self.di_loop = None
         self.self_prompt = None
+        self.autonomy = None
         self.experiments = None
 
     async def start(self):
@@ -139,6 +140,24 @@ class EvergrowthRuntime:
         from ..experiments.runner import ExperimentRunner
         self.experiments = ExperimentRunner(self.config.experiments.ledger_path)
         logger.info("Bounded experiment runner initialized")
+
+    async def _init_autonomy(self):
+        """Initialize the intent-to-experiment coordination layer."""
+        if not self.config.experiments.enabled:
+            logger.info("Autonomous experiments disabled")
+            return
+        from ..experiments import AutonomyCoordinator, ExperimentRunner
+        self.autonomy = AutonomyCoordinator(
+            ExperimentRunner(self.config.experiments.ledger_path),
+            memory=self.memory,
+        )
+        logger.info("Autonomy coordinator initialized")
+
+    async def process_autonomous_intent(self, intent, context: dict) -> dict:
+        """Route an intent into the bounded experiment pipeline."""
+        if self.autonomy is None:
+            return {"status": "disabled", "reason": "autonomy coordinator unavailable"}
+        return await self.autonomy.handle_intent(intent, context)
 
     async def _init_heartbeat(self):
         """Initialize the heartbeat engine."""
