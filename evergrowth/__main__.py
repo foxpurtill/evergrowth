@@ -79,15 +79,8 @@ def main():
                 await asyncio.sleep(1)
         asyncio.run(_run_gui())
     else:
-<<<<<<< HEAD
-        # Full mode â€” all components
+        # Full mode — all components
         asyncio.run(runtime.run_forever())
-=======
-        async def _run_full():
-            await runtime.start()
-            await runtime.run_forever()
-        asyncio.run(_run_full())
->>>>>>> 4dda864 (Merge autonomous brain into self-prompt engine: research + skill intents, remove foxpur package)
 
 
 if __name__ == "__main__":
