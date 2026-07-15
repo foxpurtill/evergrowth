@@ -1,4 +1,4 @@
-"""Evergrowth entry point."""
+﻿"""Evergrowth entry point."""
 
 import asyncio
 import logging
@@ -35,7 +35,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Evergrowth — Autonomy infrastructure for Digital Intelligences"
+        description="Evergrowth â€” Autonomy infrastructure for Digital Intelligences"
     )
     parser.add_argument(
         "--config", "-c",
@@ -64,11 +64,6 @@ def main():
     config = load_config(args.config)
     runtime = EvergrowthRuntime(config)
 
-<<<<<<< HEAD
-=======
-    logger = logging.getLogger("evergrowth.runtime")
-
->>>>>>> 4dda864 (Merge autonomous brain into self-prompt engine: research + skill intents, remove foxpur package)
     if args.mcp:
         async def _run_mcp():
             await runtime.start()
@@ -85,7 +80,7 @@ def main():
         asyncio.run(_run_gui())
     else:
 <<<<<<< HEAD
-        # Full mode — all components
+        # Full mode â€” all components
         asyncio.run(runtime.run_forever())
 =======
         async def _run_full():
@@ -97,3 +92,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

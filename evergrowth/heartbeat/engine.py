@@ -432,12 +432,38 @@ class HeartbeatEngine:
         # Self-prompt orchestration — evaluate on every beat
         if self.self_prompt:
             try:
+<<<<<<< HEAD
                 decision = await self.evaluate_self_prompt()
                 for intent in decision["intents"]:
                     if not intent["is_noop"]:
                         parts.append(
                             f"[Intent] {intent['action']}: {intent['reason']}"
                         )
+=======
+                context = dict(self._presence_context)
+                if self._away_started_at is not None:
+                    context["elapsed_seconds"] = max(
+                        0.0, time.time() - self._away_started_at
+                    )
+                context.update({"active_patterns": [], "emotional_state": None})
+                if self.memory:
+                    ctx = await self.memory.reconstruct_context(limit=20)
+                    if ctx and "Summary:" in ctx:
+                        lines = ctx.split("\n")
+                        for line in lines:
+                            if line.startswith("Patterns:"):
+                                raw_patterns = line.split(":", 1)[1].split(",")
+                                context["active_patterns"] = [
+                                    pattern.strip() for pattern in raw_patterns
+                                ]
+                            if line.startswith("Mood:"):
+                                context["emotional_state"] = line.split(":", 1)[1].strip()
+                intents = await self.self_prompt.select_intent(context)
+                self._last_selfprompt_intents = intents
+                for intent in intents:
+                    if not intent.is_noop:
+                        parts.append(f"[Intent] {intent.action}: {intent.reason}")
+>>>>>>> 9377999 (DI loop respects self-prompt noop: skips AI call when nothing significant — stops philosophy loops)
             except Exception as e:
                 self._log(f"Self-prompt orchestration failed: {e}")
 
