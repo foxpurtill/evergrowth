@@ -24,11 +24,12 @@ class ServiceRecord:
 class ServiceLease:
     """Own one service role using an atomic, heartbeat-bearing lease file."""
 
-    def __init__(self, role: str, state_dir: str | Path, *, version: str = ""):
+    def __init__(self, role: str, state_dir: str | Path, *, version: str = "", command: str = ""):
         self.role = role
         self.state_dir = Path(state_dir).expanduser()
         self.path = self.state_dir / f"{role}.json"
         self.version = version
+        self.command = command
         self.owner_token = uuid.uuid4().hex
         self.record: ServiceRecord | None = None
 
@@ -45,6 +46,7 @@ class ServiceLease:
             started_at=now,
             heartbeat_at=now,
             version=self.version,
+            command=self.command,
         )
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(asdict(record), indent=2), encoding="utf-8")

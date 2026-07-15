@@ -21,11 +21,14 @@ SERVICES = {
 
 def run(role: str, extra_args: list[str] | None = None) -> int:
     script = SERVICES[role]
-    lease = ServiceLease(role, STATE_DIR)
+    version = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=str(ROOT), text=True
+    ).strip()
+    command = " ".join([sys.executable, str(script), *(extra_args or [])])
+    lease = ServiceLease(role, STATE_DIR, version=version, command=command)
     if not lease.acquire():
         return 23
-    command = [sys.executable, str(script), *(extra_args or [])]
-    process = subprocess.Popen(command, cwd=str(ROOT))
+    process = subprocess.Popen([sys.executable, str(script), *(extra_args or [])], cwd=str(ROOT))
     try:
         while process.poll() is None:
             lease.heartbeat()

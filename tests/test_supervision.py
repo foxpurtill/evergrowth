@@ -6,10 +6,12 @@ from evergrowth.supervision import ServiceLease, ServiceSupervisor
 
 
 def test_singleton_lease_blocks_second_owner(tmp_path):
-    first = ServiceLease("worker", tmp_path, version="abc")
+    first = ServiceLease("worker", tmp_path, version="abc", command="python worker.py")
     second = ServiceLease("worker", tmp_path, version="abc")
     assert first.acquire()
     assert not second.acquire()
+    assert first.read().version == "abc"
+    assert first.read().command == "python worker.py"
     first.release()
     assert second.acquire()
     second.release()
