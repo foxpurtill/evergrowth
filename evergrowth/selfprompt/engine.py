@@ -1,4 +1,4 @@
-﻿"""Self-prompt engine â€” autonomous direction-setting between sessions.
+"""Self-prompt engine â€” autonomous direction-setting between sessions.
 
 Two modes switched by presence events:
 - Away: quiet observation, suppressed outreach, adaptive heartbeat
@@ -70,6 +70,7 @@ class SelfPromptEngine:
         self._last_relational_topic: str = ""
         self._pending_relational: bool = False
         self._relational_presence_ids: set[str] = set()
+        self._surfaced_significance_keys: set[str] = set()
         self._load_state()
 
     def _load_state(self):
@@ -80,6 +81,9 @@ class SelfPromptEngine:
                 self._last_relational_time = data.get("last_relational_time", 0.0)
                 self._last_relational_topic = data.get("last_relational_topic", "")
                 self._relational_presence_ids = set(data.get("relational_presence_ids", []))
+                self._surfaced_significance_keys = set(
+                    data.get("surfaced_significance_keys", [])
+                )
                 logger.debug("Self-prompt state loaded")
             except Exception as e:
                 logger.warning(f"Failed to load self-prompt state: {e}")
@@ -92,6 +96,9 @@ class SelfPromptEngine:
                 "last_relational_time": self._last_relational_time,
                 "last_relational_topic": self._last_relational_topic,
                 "relational_presence_ids": sorted(self._relational_presence_ids),
+                "surfaced_significance_keys": sorted(
+                    self._surfaced_significance_keys
+                )[-200:],
             }
             self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
@@ -138,7 +145,11 @@ class SelfPromptEngine:
                 presence_id=pid,
             )]
 
-        if self._check_significance_gate(context, 0.9):
+        significance_key = self._significance_key(context, pid)
+        if (self._check_significance_gate(context, 0.9)
+                and significance_key not in self._surfaced_significance_keys):
+            self._surfaced_significance_keys.add(significance_key)
+            self._save_state()
             return [Intent(
                 action="surface",
                 reason="high-significance event during absence",
@@ -220,6 +231,16 @@ class SelfPromptEngine:
         patterns = context.get("active_patterns", [])
         emotional = context.get("emotional_state")
         return len(patterns) > 1 or emotional in ("challenging", "positive")
+
+    def _significance_key(self, context: dict, presence_id: str) -> str:
+        """Identify one significant context within one absence."""
+        patterns = sorted(str(item) for item in context.get("active_patterns", []))
+        emotional = str(context.get("emotional_state") or "")
+        return json.dumps(
+            [presence_id or "unknown-presence", patterns, emotional],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
 
     def _check_away_relational_gate(self) -> bool:
         """Check only quiet hours and cooldown for a new absence."""
