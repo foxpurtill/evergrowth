@@ -6,6 +6,7 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from .runner import ExperimentResult, ExperimentRunner, ExperimentSpec
@@ -25,33 +26,74 @@ class ExperimentProposal:
     budget_seconds: float = 300.0
     risk: str = "low"
     side_effects: list[str] = field(default_factory=list)
+    external: bool = False
+    reversible: bool = True
+    costs_money: bool = False
+    privacy_sensitive: bool = False
+    affects_others: bool = False
     source_intent: str = ""
+
+
+@dataclass
+class ActionRequest:
+    name: str
+    action_id: str
+    reason: str = ""
+    risk: str = "low"
+    side_effects: list[str] = field(default_factory=list)
+    external: bool = False
+    reversible: bool = True
+    costs_money: bool = False
+    privacy_sensitive: bool = False
+    affects_others: bool = False
+    source_intent: str = ""
+
+
+class ActionLane(Enum):
+    ACT = "act"
+    ACT_AND_REPORT = "act_and_report"
+    ASK = "ask"
 
 
 @dataclass
 class GateDecision:
     approved: bool
     reason: str
+    lane: ActionLane = ActionLane.ACT
 
 
 class ExperimentAuthorityGate:
-    """Approve only low-risk, measurable, reversible registered experiments."""
+    """One boundary policy: broad interior freedom, hard stops at consequence."""
 
-    def __init__(self, allowed_side_effects: set[str] | None = None):
-        self.allowed_side_effects = allowed_side_effects or {"local_files", "memory"}
+    def classify(self, action) -> GateDecision:
+        consequential = (
+            action.costs_money
+            or action.privacy_sensitive
+            or not action.reversible
+            or (action.external and action.affects_others)
+            or action.risk not in {"low", "medium"}
+        )
+        if consequential:
+            return GateDecision(False, "consequential boundary requires approval", ActionLane.ASK)
+        live_side_effects = set(action.side_effects) - {"memory", "local_files", "sandbox"}
+        if action.external or live_side_effects:
+            return GateDecision(
+                True, "reversible low-risk live action; act and report", ActionLane.ACT_AND_REPORT
+            )
+        return GateDecision(True, "internal and reversible; free to act", ActionLane.ACT)
 
     def evaluate(self, proposal: ExperimentProposal, registry: ExperimentRegistry) -> GateDecision:
-        if proposal.risk != "low":
-            return GateDecision(False, "only low-risk experiments may run autonomously")
+        decision = self.classify(proposal)
+        if not decision.approved:
+            return decision
         missing = registry.missing(proposal)
         if missing:
-            return GateDecision(False, f"unregistered adapters: {', '.join(missing)}")
-        disallowed = sorted(set(proposal.side_effects) - self.allowed_side_effects)
-        if disallowed:
-            return GateDecision(False, f"disallowed side effects: {', '.join(disallowed)}")
+            return GateDecision(
+                False, f"cannot execute; missing adapters: {', '.join(missing)}", decision.lane
+            )
         if proposal.budget_seconds <= 0:
-            return GateDecision(False, "experiment budget must be positive")
-        return GateDecision(True, "bounded, measurable, reversible, and registered")
+            return GateDecision(False, "cannot execute; budget must be positive", decision.lane)
+        return decision
 
 
 class ExperimentRegistry:
@@ -102,13 +144,21 @@ class AutonomyCoordinator:
     async def handle_intent(self, intent, context: dict) -> dict:
         if getattr(intent, "action", "") not in {"research", "develop_skill"}:
             return {"status": "ignored", "reason": "intent is not experimental"}
+        direct = self.direct_action(intent, context)
+        if direct is not None:
+            return await self._run_direct(direct)
         proposal = self.propose(intent, context)
         if proposal is None:
-            return {"status": "no_proposal", "reason": "no measurable candidate in context"}
+            return {"status": "no_action", "reason": "no executable action in context"}
         decision = self.gate.evaluate(proposal, self.registry)
         self._log_proposal(proposal, decision)
         if not decision.approved:
-            return {"status": "rejected", "reason": decision.reason, "proposal": asdict(proposal)}
+            return {
+                "status": "rejected",
+                "lane": decision.lane.value,
+                "reason": decision.reason,
+                "proposal": asdict(proposal),
+            }
 
         spec = ExperimentSpec(
             name=proposal.name,
@@ -126,7 +176,46 @@ class AutonomyCoordinator:
             self.registry.rollbacks[proposal.rollback_id],
         )
         await self._remember(proposal, result)
-        return {"status": "completed", "proposal": asdict(proposal), "result": asdict(result)}
+        return {
+            "status": "completed",
+            "lane": decision.lane.value,
+            "proposal": asdict(proposal),
+            "result": asdict(result),
+        }
+
+    def direct_action(self, intent, context: dict) -> ActionRequest | None:
+        candidate = context.get("action_candidate")
+        if not isinstance(candidate, dict) or not {"name", "action_id"}.issubset(candidate):
+            return None
+        values = dict(candidate)
+        values["source_intent"] = getattr(intent, "action", "")
+        return ActionRequest(**values)
+
+    async def _run_direct(self, request: ActionRequest) -> dict:
+        decision = self.gate.classify(request)
+        if not decision.approved:
+            return {
+                "status": "rejected",
+                "lane": decision.lane.value,
+                "reason": decision.reason,
+                "action": asdict(request),
+            }
+        action = self.registry.actions.get(request.action_id)
+        if action is None:
+            return {
+                "status": "unavailable",
+                "lane": decision.lane.value,
+                "reason": f"missing action adapter: {request.action_id}",
+            }
+        await ExperimentRunner._call(action)
+        if self.memory is not None and hasattr(self.memory, "store"):
+            await self.memory.store(
+                f"Autonomous action {request.name}: completed; {request.reason}",
+                category="autonomy",
+                importance=5,
+                tags=["autonomy", request.source_intent, decision.lane.value],
+            )
+        return {"status": "completed", "lane": decision.lane.value, "action": asdict(request)}
 
     def propose(self, intent, context: dict) -> ExperimentProposal | None:
         candidate = context.get("experiment_candidate")
@@ -150,6 +239,11 @@ class AutonomyCoordinator:
             "budget_seconds",
             "risk",
             "side_effects",
+            "external",
+            "reversible",
+            "costs_money",
+            "privacy_sensitive",
+            "affects_others",
         ):
             if key in candidate:
                 values[key] = candidate[key]
@@ -175,7 +269,7 @@ class AutonomyCoordinator:
         self.proposal_log_path.parent.mkdir(parents=True, exist_ok=True)
         entry = {
             "proposal": asdict(proposal),
-            "gate": asdict(decision),
+            "decision": {**asdict(decision), "lane": decision.lane.value},
             "recorded_at": time.time(),
         }
         with self.proposal_log_path.open("a", encoding="utf-8") as handle:

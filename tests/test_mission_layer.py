@@ -30,12 +30,12 @@ def test_evaluator_library_metrics():
     assert EvaluatorLibrary.error_rate([{"status": "ok"}, {"status": "error"}]) == 0.5
 
 
-def test_governor_blocks_inactive_priority(tmp_path):
+def test_governor_does_not_duplicate_priority_permission(tmp_path):
     governor = LearningGovernor(tmp_path / "ledger.jsonl")
     proposal = type("P", (), {"name": "x", "metric_name": "duplicates"})()
     allowed, reason = governor.evaluate(proposal, Priority("x", "X", status="paused"))
-    assert not allowed
-    assert "active priority" in reason
+    assert allowed
+    assert "learning budget" in reason
 
 
 def test_governor_detects_plateau(tmp_path):
@@ -79,4 +79,4 @@ def test_generator_selects_highest_weight_active_signal(tmp_path):
     ]
     proposal, reason = generator.generate(signals)
     assert proposal.name == "presence-dedup"
-    assert "priority-aligned" in reason
+    assert "learning budget" in reason

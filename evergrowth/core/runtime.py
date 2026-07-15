@@ -156,12 +156,9 @@ class EvergrowthRuntime:
         if not self.config.experiments.enabled:
             logger.info("Autonomous experiments disabled")
             return
-        from ..experiments import AutonomyCoordinator, ExperimentRunner
+        from ..experiments import AutonomyCoordinator
 
-        self.autonomy = AutonomyCoordinator(
-            ExperimentRunner(self.config.experiments.ledger_path),
-            memory=self.memory,
-        )
+        self.autonomy = AutonomyCoordinator(self.experiments, memory=self.memory)
         logger.info("Autonomy coordinator initialized")
 
     async def process_autonomous_intent(self, intent, context: dict) -> dict:

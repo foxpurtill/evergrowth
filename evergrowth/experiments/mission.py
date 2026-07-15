@@ -99,18 +99,15 @@ class LearningGovernor:
         self.ledger_path = Path(ledger_path).expanduser()
         self.max_attempts_per_name = max_attempts_per_name
 
-    def evaluate(self, proposal, priority: Priority | None) -> tuple[bool, str]:
-        if priority is None or priority.status != "active":
-            return False, "proposal is not tied to an active priority"
-        if priority.allowed_metrics and proposal.metric_name not in priority.allowed_metrics:
-            return False, "metric is not approved for this priority"
+    def evaluate(self, proposal, priority: Priority | None = None) -> tuple[bool, str]:
+        """Prevent wasted repetition; permission belongs to the authority policy."""
         history = self._history(proposal.name)
         if len(history) >= self.max_attempts_per_name:
             return False, "experiment attempt budget exhausted"
         recent_failed = all(item.get("result", {}).get("status") != "keep" for item in history[-2:])
         if len(history) >= 2 and recent_failed:
             return False, "recent attempts show a failure plateau"
-        return True, "priority-aligned and within learning budget"
+        return True, "within learning budget"
 
     def _history(self, name: str) -> list[dict]:
         if not self.ledger_path.exists():

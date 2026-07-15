@@ -1,6 +1,8 @@
 """Bounded autonomous experimentation."""
 
 from .coordinator import (
+    ActionLane,
+    ActionRequest,
     AutonomyCoordinator,
     ExperimentAuthorityGate,
     ExperimentProposal,
@@ -18,6 +20,8 @@ from .mission import (
 from .runner import ExperimentResult, ExperimentRunner, ExperimentSpec
 
 __all__ = [
+    "ActionLane",
+    "ActionRequest",
     "AutonomyCoordinator",
     "ExperimentAuthorityGate",
     "ExperimentProposal",
