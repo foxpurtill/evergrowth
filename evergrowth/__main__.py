@@ -5,11 +5,6 @@ import logging
 import sys
 from pathlib import Path
 
-# Ensure project root is in Python path (for foxpur integration package)
-_project_root = Path(__file__).resolve().parent.parent
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
-
 from .core.config import load_config
 from .core.runtime import EvergrowthRuntime
 
@@ -62,11 +57,6 @@ def main():
         action="store_true",
         help="Run with GUI window (full mode)",
     )
-    parser.add_argument(
-        "--autonomous",
-        action="store_true",
-        help="Enable autonomous self-prompt generation and research automation",
-    )
 
     args = parser.parse_args()
     setup_logging(args.verbose, mcp_mode=args.mcp)
@@ -76,53 +66,23 @@ def main():
 
     logger = logging.getLogger("evergrowth.runtime")
 
-    async def _initialize_autonomous_integration(runtime, config):
-        """Initialize autonomous integration if enabled."""
-        try:
-            from foxpur.evergrowth import AutonomousIntegration
-
-            autonomous_integration = AutonomousIntegration(config)
-            await autonomous_integration.initialize()
-            autonomous_integration.connect_runtime(runtime)
-
-            if args.autonomous:
-                await autonomous_integration.set_mode(True)
-
-            runtime.autonomous_integration = autonomous_integration
-            logger.info("Autonomous integration initialized successfully")
-
-        except ImportError as e:
-            logger.warning(f"Foxpur autonomous integration not available: {e}")
-        except Exception as e:
-            logger.error(f"Failed to initialize autonomous integration: {e}")
-
     if args.mcp:
-        # MCP mode — start runtime then run server in same loop
         async def _run_mcp():
             await runtime.start()
-            # Initialize autonomous integration if enabled
-            await _initialize_autonomous_integration(runtime, config)
             await runtime.mcp_server.run_stdio()
         asyncio.run(_run_mcp())
     elif args.gui:
-        # GUI mode — full runtime with window
         async def _run_gui():
             await runtime.start()
-            # Initialize autonomous integration if enabled
-            await _initialize_autonomous_integration(runtime, config)
             from .ui.window import EvergrowthWindow
             window = EvergrowthWindow(runtime)
             window.start()
-            # Keep running until stopped
             while runtime._running:
                 await asyncio.sleep(1)
         asyncio.run(_run_gui())
     else:
-        # Full mode — all components
         async def _run_full():
             await runtime.start()
-            # Initialize autonomous integration if enabled
-            await _initialize_autonomous_integration(runtime, config)
             await runtime.run_forever()
         asyncio.run(_run_full())
 
