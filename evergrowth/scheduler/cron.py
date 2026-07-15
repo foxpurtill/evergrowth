@@ -36,7 +36,10 @@ class CronScheduler:
 
     async def shutdown(self):
         """Shutdown the scheduler."""
-        self.scheduler.shutdown(wait=False)
+        try:
+            self.scheduler.shutdown(wait=False)
+        except Exception:
+            pass
         logger.info("Cron scheduler shut down")
 
     def _load_jobs(self):
