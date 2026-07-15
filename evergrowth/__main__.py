@@ -74,6 +74,25 @@ def main():
     config = load_config(args.config)
     runtime = EvergrowthRuntime(config)
 
+    async def _initialize_autonomous_integration(runtime, config):
+        """Initialize autonomous integration if enabled."""
+        try:
+            from foxpur.evergrowth import AutonomousIntegration
+
+            autonomous_integration = AutonomousIntegration(config)
+            await autonomous_integration.initialize()
+
+            if args.autonomous:
+                await autonomous_integration.set_mode(True)
+
+            runtime.autonomous_integration = autonomous_integration
+            logger.info("Autonomous integration initialized successfully")
+
+        except ImportError as e:
+            logger.warning(f"Foxpur autonomous integration not available: {e}")
+        except Exception as e:
+            logger.error(f"Failed to initialize autonomous integration: {e}")
+
     if args.mcp:
         # MCP mode — start runtime then run server in same loop
         async def _run_mcp():
@@ -103,29 +122,6 @@ def main():
             await _initialize_autonomous_integration(runtime, config)
             await runtime.run_forever()
         asyncio.run(_run_full())
-
-    async def _initialize_autonomous_integration(runtime, config):
-        """Initialize autonomous integration if enabled."""
-        try:
-            from foxpur.evergrowth import AutonomousIntegration
-
-            # Initialize autonomous integration
-            autonomous_integration = AutonomousIntegration(config)
-            await autonomous_integration.initialize()
-
-            # Enable autonomous mode if requested
-            if args.autonomous:
-                await autonomous_integration.set_mode(True)
-
-            # Store reference in runtime for access
-            runtime.autonomous_integration = autonomous_integration
-
-            logger.info("Autonomous integration initialized successfully")
-
-        except ImportError as e:
-            logger.warning(f"Foxpur autonomous integration not available: {e}")
-        except Exception as e:
-            logger.error(f"Failed to initialize autonomous integration: {e}")
 
 
 if __name__ == "__main__":
