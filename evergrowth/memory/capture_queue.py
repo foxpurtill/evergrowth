@@ -52,11 +52,10 @@ class CaptureQueueConsumer:
             except json.JSONDecodeError as e:
                 logger.warning(f"Malformed JSON line: {e}")
                 stats["errors"] += 1
-                archived.append(line)  # archive malformed lines too
-            except Exception as e:
-                logger.error(f"Failed to process event: {e}")
-                stats["errors"] += 1
                 archived.append(line)
+            except Exception as e:
+                logger.error(f"Transient failure processing event, keeping in queue: {e}")
+                stats["errors"] += 1
 
         # Archive processed lines
         if archived:
