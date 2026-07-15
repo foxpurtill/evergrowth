@@ -183,7 +183,8 @@ class EvergrowthRuntime:
 
     async def run_forever(self):
         """Run until interrupted."""
-        await self.start()
+        # start() must be called before run_forever()
+        # This ensures initialization happens exactly once
 
         # Set up signal handlers
         loop = asyncio.get_running_loop()
