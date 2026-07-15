@@ -70,6 +70,7 @@ class SelfPromptEngine:
         self._last_relational_topic: str = ""
         self._pending_relational: bool = False
         self._relational_presence_ids: set[str] = set()
+        self._surfaced_significance_keys: set[str] = set()
         self._load_state()
 
     def _load_state(self):
@@ -80,20 +81,34 @@ class SelfPromptEngine:
                 self._last_relational_time = data.get("last_relational_time", 0.0)
                 self._last_relational_topic = data.get("last_relational_topic", "")
                 self._relational_presence_ids = set(data.get("relational_presence_ids", []))
+                self._surfaced_significance_keys = set(data.get("surfaced_significance_keys", []))
                 logger.debug("Self-prompt state loaded")
             except Exception as e:
                 logger.warning(f"Failed to load self-prompt state: {e}")
 
     def _save_state(self):
         """Persist cooldown/dedup state."""
+        import json as _json, os as _os, tempfile as _tempfile, pathlib as _pathlib
         try:
             self._state_path.parent.mkdir(parents=True, exist_ok=True)
             data = {
                 "last_relational_time": self._last_relational_time,
                 "last_relational_topic": self._last_relational_topic,
                 "relational_presence_ids": sorted(self._relational_presence_ids),
+                "surfaced_significance_keys": sorted(self._surfaced_significance_keys),
             }
-            self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            payload = _json.dumps(data, indent=2)
+            tmp = _tempfile.NamedTemporaryFile(
+                dir=self._state_path.parent, mode="w", encoding="utf-8",
+                delete=False, prefix=".state_tmp_",
+            )
+            try:
+                tmp.write(payload)
+                tmp.close()
+                _os.replace(tmp.name, str(self._state_path))
+            except Exception:
+                _pathlib.Path(tmp.name).unlink(missing_ok=True)
+                raise
         except Exception as e:
             logger.warning(f"Failed to save self-prompt state: {e}")
 
@@ -157,12 +172,24 @@ class SelfPromptEngine:
             presence_id=pid,
         )]
 
+    @staticmethod
+    def _significance_key(context: dict) -> str:
+        """Build a stable key for the current significance context."""
+        patterns = sorted(context.get("active_patterns", []))
+        emotional = context.get("emotional_state", "")
+        return f"{'|'.join(patterns)}::{emotional}"
+
     async def _return_intents(self, context: dict) -> list[Intent]:
         """In return mode, score context and select actionable intents."""
         intents = []
         pid = context.get("presence_id", "")
 
-        if self._check_significance_gate(context, self.config.significance_threshold):
+        sig_key = self._significance_key(context)
+        already_surfaced = sig_key in self._surfaced_significance_keys
+
+        if self._check_significance_gate(context, self.config.significance_threshold) and not already_surfaced:
+            self._surfaced_significance_keys.add(sig_key)
+            self._save_state()
             intents.append(Intent(
                 action="surface",
                 reason="high-significance context found",

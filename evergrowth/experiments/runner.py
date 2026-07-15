@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
@@ -27,6 +28,7 @@ class ExperimentSpec:
     evaluate_timeout: float = 60.0
     rollback_timeout: float = 30.0
     minimum_improvement: float = 0.0
+    attempt_id: str = ""
 
 
 @dataclass
@@ -85,6 +87,18 @@ class ExperimentRunner:
             elapsed = time.monotonic() - started
             status = "crash"
             note = str(exc)
+        except asyncio.CancelledError:
+            elapsed = time.monotonic() - started
+            status = "cancelled"
+            note = "task cancelled during experiment"
+            import asyncio as _asyncio
+            try:
+                await _asyncio.shield(
+                    self._call_with_timeout(rollback, spec.rollback_timeout, "rollback")
+                )
+            except Exception as rb_exc:
+                note += f"; rollback after cancel also failed: {rb_exc}"
+            raise
         except Exception as exc:
             elapsed = time.monotonic() - started
             status = "crash"
@@ -130,5 +144,57 @@ class ExperimentRunner:
     def _append(self, spec: ExperimentSpec, result: ExperimentResult) -> None:
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         entry = {"spec": asdict(spec), "result": asdict(result), "recorded_at": time.time()}
-        with self.ledger_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        payload = json.dumps(entry, ensure_ascii=False)
+
+        # Dedup by attempt_id if provided
+        if spec.attempt_id:
+            existing = self._read_ledger()
+            if any(e.get("spec", {}).get("attempt_id") == spec.attempt_id for e in existing):
+                logger.info(f"Experiment {spec.name}: attempt_id {spec.attempt_id} already recorded")
+                return
+
+        # Handle trailing partial JSON line from interrupted append
+        self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        existing = b""
+        if self.ledger_path.exists():
+            existing = self.ledger_path.read_bytes()
+            if existing and not existing.endswith(b"\n"):
+                logger.warning("Ledger had trailing partial line — separating")
+                existing = existing.rstrip(b"\r\n") + b"\n"
+
+        # Atomic write via temp + replace
+        import tempfile
+        tmp = tempfile.NamedTemporaryFile(
+            dir=self.ledger_path.parent, mode="wb", delete=False, prefix=".ledger_tmp_"
+        )
+        try:
+            if existing:
+                tmp.write(existing)
+            tmp.write(payload.encode("utf-8"))
+            tmp.write(b"\n")
+            tmp.flush()
+            os.replace(tmp.name, str(self.ledger_path))
+        except Exception:
+            try:
+                Path(tmp.name).unlink()
+            except Exception:
+                pass
+            raise
+
+    def _read_ledger(self, path: Path | None = None) -> list[dict]:
+        """Read all entries from the ledger for dedup."""
+        ledger = path or self.ledger_path
+        if not ledger.exists():
+            return []
+        entries = []
+        for line in ledger.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+                if isinstance(parsed, dict):
+                    entries.append(parsed)
+            except json.JSONDecodeError:
+                continue
+        return entries

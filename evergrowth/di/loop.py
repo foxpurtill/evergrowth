@@ -37,6 +37,7 @@ class DILoop:
 
         self.data_dir = config.resolve_data_dir()
         self.prompt_path = self.data_dir / "heartbeat_prompt.txt"
+        self.processing_path = self.data_dir / "heartbeat_prompt.processing"
         self.signal_path = self.data_dir / "heartbeat_signal.txt"
         self.plan_path = self.data_dir / "prompt_plan.md"
         self.log_dir = self.data_dir / "logs"
@@ -198,9 +199,14 @@ class DILoop:
 
     async def _handle_prompt(self):
         """Handle a heartbeat prompt."""
+        # Claim the prompt via atomic rename — survives provider failure
         try:
-            prompt_text = self.prompt_path.read_text(encoding="utf-8").strip()
-            self.prompt_path.unlink()
+            if self.processing_path.exists():
+                logger.info("Found unprocessed prompt from previous cycle (crash recovery)")
+                prompt_text = self.processing_path.read_text(encoding="utf-8").strip()
+            else:
+                self.prompt_path.rename(self.processing_path)
+                prompt_text = self.processing_path.read_text(encoding="utf-8").strip()
             logger.info(f"DI loop received prompt: {prompt_text[:100]}...")
         except Exception as e:
             logger.error(f"Failed to read prompt: {e}")
@@ -262,6 +268,13 @@ class DILoop:
 
         self._write_brief(response, experiment_results)
         self._signal_heartbeat(next_interval)
+
+        # Critical path succeeded — safe to delete processing copy
+        try:
+            if self.processing_path.exists():
+                self.processing_path.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to clean processing file: {e}")
 
         # Non-critical: speak the response
         speak(response)
