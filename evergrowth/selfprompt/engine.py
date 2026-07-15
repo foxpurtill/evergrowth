@@ -1,4 +1,4 @@
-"""Self-prompt engine — autonomous direction-setting between sessions.
+﻿"""Self-prompt engine â€” autonomous direction-setting between sessions.
 
 Two modes switched by presence events:
 - Away: quiet observation, suppressed outreach, adaptive heartbeat
@@ -33,7 +33,7 @@ class OutreachGate(Enum):
 
 @dataclass
 class Intent:
-    """A selected intent — what the DI decides to do next."""
+    """A selected intent â€” what the DI decides to do next."""
     action: str
     reason: str
     significance: float
@@ -101,7 +101,7 @@ class SelfPromptEngine:
         """Switch between away and return mode."""
         old_mode = self.mode
         self.mode = mode
-        logger.info(f"Self-prompt mode: {old_mode.value} → {mode.value}")
+        logger.info(f"Self-prompt mode: {old_mode.value} â†’ {mode.value}")
 
         if mode == PresenceMode.RETURN and old_mode == PresenceMode.AWAY:
             self.cancel_pending_relational(presence_id)
@@ -175,14 +175,14 @@ class SelfPromptEngine:
             self._pending_relational = True
             intents.append(Intent(
                 action="check_in",
-                reason="relational presence — gentle check-in",
+                reason="relational presence â€” gentle check-in",
                 significance=0.3,
                 gate=OutreachGate.RELATIONAL,
                 presence_id=pid,
             ))
             self._save_state()
 
-        # Research gate — explore topics when nothing else demands attention
+        # Research gate â€” explore topics when nothing else demands attention
         if not intents and self._check_research_gate(context):
             intents.append(Intent(
                 action="research",
@@ -192,7 +192,7 @@ class SelfPromptEngine:
                 presence_id=pid,
             ))
 
-        # Skill gate — develop skills when idle
+        # Skill gate â€” develop skills when idle
         if not intents and self._check_skill_gate(context):
             intents.append(Intent(
                 action="develop_skill",
@@ -263,19 +263,18 @@ class SelfPromptEngine:
         return min(1.0, 0.5 + len(patterns) * 0.2)
 
     def _check_research_gate(self, context: dict) -> bool:
-        """Research gate — time-based and pattern-aware."""
-        now = time.time()
+        """Research gate â€” time-based and pattern-aware."""
         patterns = context.get("active_patterns", [])
         entities = context.get("active_entities", [])
         return bool(patterns or entities)
 
     def _check_skill_gate(self, context: dict) -> bool:
-        """Skill gate — develop skills when idle and motivated."""
+        """Skill gate â€” develop skills when idle and motivated."""
         hour = time.localtime().tm_hour
         if self.config.quiet_hours_start <= hour or hour < self.config.quiet_hours_end:
             return False
-        patterns = context.get("active_patterns", [])
         emotional = context.get("emotional_state")
         if emotional == "challenging":
             return False
         return True
+
