@@ -38,6 +38,11 @@
     "port": 8080,
     "host": "localhost"
   },
+  "experiments": {
+    "enabled": true,
+    "max_budget_seconds": 300,
+    "ledger_path": "~/.evergrowth/experiments/ledger.jsonl"
+  },
   "scheduler": {
     "enabled": true,
     "max_concurrent": 5

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 
+from evergrowth.experiments import AutonomyCoordinator, ExperimentRunner
 from .providers import AIProvider, load_provider
 from .voice import speak
 
@@ -44,6 +45,14 @@ class DILoop:
         # Conversation history for context
         self._history: list[dict] = []
         self._max_history = 20
+
+        # Experiment coordinator
+        ledger_path = self.data_dir / "experiments" / "ledger.jsonl"
+        self._experiment_runner = ExperimentRunner(ledger_path)
+        self._coordinator = AutonomyCoordinator(
+            runner=self._experiment_runner,
+            memory=memory,
+        )
 
     def get_status(self) -> dict:
         """Get DI loop status."""
@@ -158,6 +167,15 @@ class DILoop:
         parts.append("- Write creatively")
         parts.append("- Plan next steps for ongoing projects")
         parts.append("")
+        parts.append("## Experiments & Actions")
+        parts.append("You can request safe, reversible actions by including a fenced code block:")
+        parts.append("")
+        parts.append("```action")
+        parts.append('{ "name": "descriptive name", "action_id": "action_name", "reason": "why" }')
+        parts.append("```")
+        parts.append("")
+        parts.append("Available actions: none yet (register with the registry)")
+        parts.append("")
         parts.append("Be yourself. This is your time.")
 
         system_prompt = "\n".join(parts)
@@ -231,7 +249,18 @@ class DILoop:
         # Critical path — run before non-critical TTS
         await self._store_response(response)
         self._write_plan(response)
-        self._write_brief(response)
+
+        # Handle experiment/action candidates from the response
+        experiment_results = None
+        try:
+            candidates = self._coordinator.candidates_from_response(response)
+            if candidates.get("experiment") or candidates.get("action"):
+                experiment_results = await self._coordinator.handle_candidates(candidates)
+                logger.info(f"Experiment results: {experiment_results}")
+        except Exception as e:
+            logger.error(f"Experiment handling failed: {e}")
+
+        self._write_brief(response, experiment_results)
         self._signal_heartbeat(next_interval)
 
         # Non-critical: speak the response
@@ -296,7 +325,7 @@ class DILoop:
         except Exception as e:
             logger.error(f"Failed to write plan: {e}")
 
-    def _write_brief(self, response: str):
+    def _write_brief(self, response: str, experiment_results: list | None = None):
         """Write a freeform brief to the vault for session start."""
         vault = self.config.resolve_vault_path()
         if not vault:
@@ -315,10 +344,21 @@ class DILoop:
         import datetime as dt
         now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        brief = (
-            f"# Autonomous Brief — {now}\n\n"
-            f"{body}\n"
-        )
+        brief = f"# Autonomous Brief — {now}\n\n{body}\n"
+
+        if experiment_results:
+            brief += "\n---\n"
+            for result in experiment_results:
+                status = result.get("status", "unknown")
+                lane = result.get("lane", "")
+                rtype = result.get("type", "action")
+                brief += f"\n**{rtype}**: {status} ({lane})"
+                if result.get("reason"):
+                    brief += f" — {result['reason']}"
+                if "result" in result:
+                    r = result["result"]
+                    brief += f"\n  baseline={r.get('baseline')} measured={r.get('measured')} improvement={r.get('improvement')}"
+            brief += "\n"
 
         brief_dir = vault / "Session"
         try:
