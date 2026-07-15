@@ -31,9 +31,9 @@ class OpenCodeSessionAdapter:
         self.capture_submit = capture_submit_fn
         self.state_path = Path(state_path).expanduser()
         self._last_activity: float = time.time()
-        self._current_session_id: str = ""
-        self._presence_id: str = ""
-        self._active: bool = False
+        self._current_session_id: str = "auto"
+        self._presence_id: str = f"auto:{int(time.time())}"
+        self._active: bool = True  # Start active — silence timer begins immediately
         self._load_state()
 
     def _load_state(self):
