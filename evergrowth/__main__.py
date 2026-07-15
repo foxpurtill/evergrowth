@@ -83,6 +83,7 @@ def main():
 
             autonomous_integration = AutonomousIntegration(config)
             await autonomous_integration.initialize()
+            autonomous_integration.connect_runtime(runtime)
 
             if args.autonomous:
                 await autonomous_integration.set_mode(True)

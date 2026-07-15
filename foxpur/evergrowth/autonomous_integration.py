@@ -107,6 +107,21 @@ class AutonomousIntegration:
             logger.info("Autonomous mode disabled - waiting for human prompts")
             await self._stop_autonomous_prompt_generation()
 
+    def connect_runtime(self, runtime):
+        """Connect to live runtime components."""
+        if hasattr(runtime, 'memory') and runtime.memory:
+            self.memory = runtime.memory
+            self.selfprompt.memory = runtime.memory
+            if self.autonomous_brain:
+                self.autonomous_brain.memory = runtime.memory
+            logger.info("Autonomous integration connected to runtime memory")
+
+        if hasattr(runtime, 'skills') and runtime.skills:
+            self.skills = runtime.skills
+            if self.autonomous_brain:
+                self.autonomous_brain.skills = runtime.skills
+            logger.info("Autonomous integration connected to runtime skills")
+
     async def _start_autonomous_prompt_generation(self):
         """Start background task for autonomous prompt generation."""
         asyncio.create_task(self._autonomous_prompt_loop())
