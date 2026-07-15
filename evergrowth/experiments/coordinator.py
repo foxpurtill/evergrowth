@@ -331,28 +331,34 @@ class AutonomyCoordinator:
                 "reason": f"missing action adapter: {request.action_id}",
             }
         await self._call(action)
-        if self.memory is not None and hasattr(self.memory, "store"):
-            await self.memory.store(
-                f"Autonomous action {request.name}: completed; {request.reason}",
-                category="autonomy",
-                importance=5,
-                tags=["autonomy", request.source_intent, decision.lane.value],
-            )
+        try:
+            if self.memory is not None and hasattr(self.memory, "store"):
+                await self.memory.store(
+                    f"Autonomous action {request.name}: completed; {request.reason}",
+                    category="autonomy",
+                    importance=5,
+                    tags=["autonomy", request.source_intent, decision.lane.value],
+                )
+        except Exception as e:
+            logger.warning(f"Action done but memory recording failed: {e}")
         return {"status": "completed", "lane": decision.lane.value, "action": asdict(request)}
 
     async def _remember(self, proposal: ExperimentProposal, result: ExperimentResult) -> None:
         if self.memory is None or not hasattr(self.memory, "store"):
             return
-        await self.memory.store(
-            (
-                f"Autonomous experiment {proposal.name}: {result.status}; "
-                f"{proposal.metric_name} {result.baseline} -> {result.measured}; "
-                f"improvement={result.improvement}; {result.note}"
-            ),
-            category="experiment",
-            importance=7,
-            tags=["autonomy", proposal.source_intent, result.status],
-        )
+        try:
+            await self.memory.store(
+                (
+                    f"Autonomous experiment {proposal.name}: {result.status}; "
+                    f"{proposal.metric_name} {result.baseline} -> {result.measured}; "
+                    f"improvement={result.improvement}; {result.note}"
+                ),
+                category="experiment",
+                importance=7,
+                tags=["autonomy", proposal.source_intent, result.status],
+            )
+        except Exception as e:
+            logger.warning(f"Experiment done but memory recording failed: {e}")
 
     def _log_proposal(self, proposal: ExperimentProposal, decision: GateDecision) -> None:
         self.proposal_log_path.parent.mkdir(parents=True, exist_ok=True)
