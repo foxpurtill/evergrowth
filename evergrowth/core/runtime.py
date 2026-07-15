@@ -61,6 +61,7 @@ class EvergrowthRuntime:
         await self._init_skills()
         await self._init_self_prompt()
         await self._init_experiments()
+        await self._init_autonomy()
         await self._init_heartbeat()
         await self._init_scheduler()
         await self._init_mcp()

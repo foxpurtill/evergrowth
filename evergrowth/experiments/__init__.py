@@ -7,6 +7,14 @@ from .coordinator import (
     ExperimentRegistry,
     GateDecision,
 )
+from .mission import (
+    EvaluatorLibrary,
+    LearningGovernor,
+    Priority,
+    PriorityBoard,
+    TelemetryProposalGenerator,
+    TelemetrySignal,
+)
 from .runner import ExperimentResult, ExperimentRunner, ExperimentSpec
 
 __all__ = [
@@ -15,6 +23,12 @@ __all__ = [
     "ExperimentProposal",
     "ExperimentRegistry",
     "GateDecision",
+    "EvaluatorLibrary",
+    "LearningGovernor",
+    "Priority",
+    "PriorityBoard",
+    "TelemetryProposalGenerator",
+    "TelemetrySignal",
     "ExperimentResult",
     "ExperimentRunner",
     "ExperimentSpec",
