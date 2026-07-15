@@ -390,6 +390,7 @@ class HeartbeatEngine:
                             if line.startswith("Mood:"):
                                 context["emotional_state"] = line.split(":", 1)[1].strip()
                 intents = await self.self_prompt.select_intent(context)
+                self._last_selfprompt_intents = intents
                 for intent in intents:
                     if not intent.is_noop:
                         parts.append(f"[Intent] {intent.action}: {intent.reason}")

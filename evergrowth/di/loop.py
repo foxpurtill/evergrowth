@@ -188,6 +188,14 @@ class DILoop:
             logger.error(f"Failed to read prompt: {e}")
             return
 
+        # Check heartbeat's self-prompt decision — skip AI call if noop
+        if self.heartbeat and hasattr(self.heartbeat, '_last_selfprompt_intents'):
+            intents = self.heartbeat._last_selfprompt_intents
+            if len(intents) == 1 and intents[0].is_noop:
+                logger.info(f"Self-prompt: noop ({intents[0].noop_reason}) — skipping AI call")
+                self._signal_heartbeat(15)
+                return
+
         if not self._provider:
             logger.error("No AI provider configured")
             return
