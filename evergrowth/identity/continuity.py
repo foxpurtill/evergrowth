@@ -54,10 +54,21 @@ class IdentityManager:
         }
 
     def _save_state(self):
-        """Save identity state to file."""
+        """Save identity state to file atomically."""
+        import tempfile as _tempfile, os as _os, pathlib as _pathlib
         try:
-            with open(self.state_file, "w", encoding="utf-8") as f:
-                json.dump(self._state, f, indent=2, ensure_ascii=False)
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _tempfile.NamedTemporaryFile(
+                dir=self.state_file.parent, mode="w", encoding="utf-8",
+                delete=False, prefix=".identity_tmp_",
+            )
+            try:
+                json.dump(self._state, tmp, indent=2, ensure_ascii=False)
+                tmp.close()
+                _os.replace(tmp.name, str(self.state_file))
+            except Exception:
+                _pathlib.Path(tmp.name).unlink(missing_ok=True)
+                raise
         except Exception as e:
             logger.error(f"Failed to save identity state: {e}")
 

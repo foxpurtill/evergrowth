@@ -417,8 +417,12 @@ class EvergrowthMCPServer:
                 )
 
             result = await handler(arguments)
+            is_error = isinstance(result, dict) and (
+                result.get("error") or result.get("status") in ("error", "failed")
+            )
             return CallToolResult(
-                content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+                content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+                isError=is_error,
             )
 
         except Exception as e:

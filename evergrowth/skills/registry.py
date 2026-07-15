@@ -71,11 +71,22 @@ class SkillRegistry:
                 logger.warning(f"Failed to load skill {skill_file}: {e}")
 
     def _save_skill(self, skill: Skill):
-        """Save a skill to disk."""
+        """Save a skill to disk atomically."""
+        import tempfile as _tempfile, os as _os, pathlib as _pathlib
         skill_file = self.skills_path / f"{skill.id}.json"
         try:
-            with open(skill_file, "w", encoding="utf-8") as f:
-                json.dump(skill.to_dict(), f, indent=2, ensure_ascii=False)
+            self.skills_path.mkdir(parents=True, exist_ok=True)
+            tmp = _tempfile.NamedTemporaryFile(
+                dir=self.skills_path, mode="w", encoding="utf-8",
+                delete=False, prefix=".skill_tmp_",
+            )
+            try:
+                json.dump(skill.to_dict(), tmp, indent=2, ensure_ascii=False)
+                tmp.close()
+                _os.replace(tmp.name, str(skill_file))
+            except Exception:
+                _pathlib.Path(tmp.name).unlink(missing_ok=True)
+                raise
         except Exception as e:
             logger.error(f"Failed to save skill {skill.name}: {e}")
 
