@@ -55,6 +55,7 @@ class HeartbeatEngine:
         self._beat_count = 0
         self._presence_context: dict = {}
         self._away_started_at: float | None = None
+        self._fire_task: asyncio.Task | None = None  # track in-flight _fire for cancellation
 
         self.data_dir = config.resolve_data_dir()
         self.log_dir = self.data_dir / "logs"
@@ -246,6 +247,9 @@ class HeartbeatEngine:
         if self._timer:
             self._timer.cancel()
             self._timer = None
+        if self._fire_task and not self._fire_task.done():
+            self._fire_task.cancel()
+            self._fire_task = None
         self._log("Heartbeat stopped")
 
     def toggle(self) -> int:
@@ -282,7 +286,9 @@ class HeartbeatEngine:
 
     async def _fire(self):
         """Fire the heartbeat — build prompt, inject, wait for signal."""
+        self._fire_task = asyncio.current_task()
         if not self._active:
+            self._fire_task = None
             return
 
         self._beat_count += 1
@@ -334,6 +340,7 @@ class HeartbeatEngine:
             f"last_interval={self._last_interval}, using={interval}"
         )
         self._schedule_next(delay_minutes=interval)
+        self._fire_task = None
 
     async def _build_prompt(self) -> str:
         """Build the heartbeat prompt with context cache."""
