@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import signal
+from pathlib import Path
 
 from .config import EvergrowthConfig, load_config
 
@@ -41,6 +42,8 @@ class EvergrowthRuntime:
         self.self_prompt = None
         self.autonomy = None
         self.experiments = None
+        self.telemetry = None
+        self.deployment = None
 
     async def start(self):
         """Initialize and start all components."""
@@ -62,6 +65,7 @@ class EvergrowthRuntime:
         await self._init_self_prompt()
         await self._init_experiments()
         await self._init_autonomy()
+        await self._init_live_telemetry()
         await self._init_heartbeat()
         await self._init_scheduler()
         await self._init_mcp()
@@ -109,6 +113,7 @@ class EvergrowthRuntime:
     async def _init_memory(self):
         """Initialize the memory engine."""
         from ..memory.engine import MemoryEngine
+
         self.memory = MemoryEngine(self.config)
         await self.memory.initialize()
         logger.info("Memory engine initialized")
@@ -116,6 +121,7 @@ class EvergrowthRuntime:
     async def _init_identity(self):
         """Initialize the identity layer."""
         from ..identity.continuity import IdentityManager
+
         self.identity = IdentityManager(self.config)
         await self.identity.initialize()
         logger.info("Identity layer initialized")
@@ -123,6 +129,7 @@ class EvergrowthRuntime:
     async def _init_skills(self):
         """Initialize the skills system."""
         from ..skills.registry import SkillRegistry
+
         self.skills = SkillRegistry(self.config)
         await self.skills.initialize()
         logger.info("Skills system initialized")
@@ -130,6 +137,7 @@ class EvergrowthRuntime:
     async def _init_self_prompt(self):
         """Initialize the self-prompt decision engine."""
         from ..selfprompt.engine import SelfPromptEngine
+
         self.self_prompt = SelfPromptEngine(self.memory)
         logger.info("Self-prompt engine initialized")
 
@@ -139,6 +147,7 @@ class EvergrowthRuntime:
             logger.info("Experiment runner disabled")
             return
         from ..experiments.runner import ExperimentRunner
+
         self.experiments = ExperimentRunner(self.config.experiments.ledger_path)
         logger.info("Bounded experiment runner initialized")
 
@@ -148,6 +157,7 @@ class EvergrowthRuntime:
             logger.info("Autonomous experiments disabled")
             return
         from ..experiments import AutonomyCoordinator, ExperimentRunner
+
         self.autonomy = AutonomyCoordinator(
             ExperimentRunner(self.config.experiments.ledger_path),
             memory=self.memory,
@@ -160,12 +170,51 @@ class EvergrowthRuntime:
             return {"status": "disabled", "reason": "autonomy coordinator unavailable"}
         return await self.autonomy.handle_intent(intent, context)
 
+    async def _init_live_telemetry(self):
+        """Initialize normalized telemetry and write live-version evidence."""
+        from ..telemetry import DeploymentVerifier, TelemetryEvent, TelemetryStore
+
+        data_dir = self.config.resolve_data_dir()
+        self.telemetry = TelemetryStore(data_dir / "telemetry.jsonl")
+        repo_path = Path(__file__).resolve().parents[2]
+        self.deployment = DeploymentVerifier(repo_path, data_dir / "running_version.json")
+        report = self.deployment.mark_running(smoke_ok=True, note="runtime initialized")
+        self.telemetry.record(
+            TelemetryEvent(
+                kind="runtime_start",
+                value=1.0,
+                source="evergrowth.runtime",
+                details={"commit": report.observed_commit, "status": report.status},
+            )
+        )
+        logger.info("Live telemetry initialized at commit %s", report.observed_commit[:12])
+
+    def record_telemetry(
+        self, kind: str, value: float, source: str, details: dict | None = None
+    ) -> None:
+        """Record one normalized signal from a live adapter."""
+        if self.telemetry is None:
+            return
+        from ..telemetry import TelemetryEvent
+
+        self.telemetry.record(TelemetryEvent(kind, value, source, details=details))
+
+    def verify_live_deployment(self, expected_commit: str, smoke_ok: bool = True):
+        """Compare expected repository state with the checkout used by this runtime."""
+        if self.deployment is None:
+            return None
+        return self.deployment.verify(expected_commit, smoke_ok=smoke_ok)
+
     async def _init_heartbeat(self):
         """Initialize the heartbeat engine."""
         from ..heartbeat.engine import HeartbeatEngine
+
         loop = asyncio.get_running_loop()
         self.heartbeat = HeartbeatEngine(
-            self.config, self.memory, self.identity, loop=loop,
+            self.config,
+            self.memory,
+            self.identity,
+            loop=loop,
             self_prompt=self.self_prompt,
         )
         logger.info("Heartbeat engine initialized")
@@ -173,6 +222,7 @@ class EvergrowthRuntime:
     async def _init_scheduler(self):
         """Initialize the cron scheduler."""
         from ..scheduler.cron import CronScheduler
+
         self.scheduler = CronScheduler(self.config)
         await self.scheduler.initialize()
         logger.info("Cron scheduler initialized")
@@ -180,6 +230,7 @@ class EvergrowthRuntime:
     async def _init_mcp(self):
         """Initialize the MCP server."""
         from ..mcp.server import EvergrowthMCPServer
+
         self.mcp_server = EvergrowthMCPServer(
             self.config, self.memory, self.skills, self.identity, self.heartbeat, self.scheduler
         )
@@ -189,6 +240,7 @@ class EvergrowthRuntime:
         """Initialize the system tray application."""
         try:
             from ..ui.tray import TrayApp
+
             self.tray = TrayApp(self)
             self.tray.start()
             logger.info("System tray initialized")
@@ -204,8 +256,12 @@ class EvergrowthRuntime:
 
         try:
             from ..di.loop import DILoop
+
             self.di_loop = DILoop(
-                self.config, self.memory, self.identity, self.heartbeat,
+                self.config,
+                self.memory,
+                self.identity,
+                self.heartbeat,
             )
             await self.di_loop.start()
             logger.info("DI loop initialized")
