@@ -87,6 +87,11 @@ class EvergrowthConfig:
     def resolve_skills_path(self) -> Path:
         return Path(self.skills.skills_path).expanduser().resolve()
 
+    def resolve_vault_path(self) -> Path | None:
+        if not self.identity.vault_path:
+            return None
+        return Path(self.identity.vault_path).expanduser().resolve()
+
 
 def _dict_to_dataclass(cls, data: dict) -> Any:
     """Recursively convert a dict to a dataclass."""

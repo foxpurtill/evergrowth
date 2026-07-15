@@ -171,6 +171,7 @@ class HeartbeatEngine:
                     elif line.startswith("Mood:"):
                         context["emotional_state"] = line.split(":", 1)[1].strip()
         intents = await self.self_prompt.select_intent(context)
+        self._last_selfprompt_intents = intents
         return {
             "status": "ok",
             "mode": self.self_prompt.mode.value,

@@ -1,4 +1,4 @@
-"""Evergrowth entry point."""
+﻿"""Evergrowth entry point."""
 
 import asyncio
 import logging
@@ -35,7 +35,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Evergrowth — Autonomy infrastructure for Digital Intelligences"
+        description="Evergrowth â€” Autonomy infrastructure for Digital Intelligences"
     )
     parser.add_argument(
         "--config", "-c",
@@ -65,19 +65,16 @@ def main():
     runtime = EvergrowthRuntime(config)
 
     if args.mcp:
-        # MCP mode — start runtime then run server in same loop
         async def _run_mcp():
             await runtime.start()
             await runtime.mcp_server.run_stdio()
         asyncio.run(_run_mcp())
     elif args.gui:
-        # GUI mode — full runtime with window
         async def _run_gui():
             await runtime.start()
             from .ui.window import EvergrowthWindow
             window = EvergrowthWindow(runtime)
             window.start()
-            # Keep running until stopped
             while runtime._running:
                 await asyncio.sleep(1)
         asyncio.run(_run_gui())
@@ -88,3 +85,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
