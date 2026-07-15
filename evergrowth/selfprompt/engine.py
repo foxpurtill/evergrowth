@@ -27,6 +27,8 @@ class PresenceMode(Enum):
 class OutreachGate(Enum):
     SIGNIFICANCE = "significance"
     RELATIONAL = "relational"
+    RESEARCH = "research"
+    SKILL = "skill"
 
 
 @dataclass
@@ -180,6 +182,26 @@ class SelfPromptEngine:
             ))
             self._save_state()
 
+        # Research gate — explore topics when nothing else demands attention
+        if not intents and self._check_research_gate(context):
+            intents.append(Intent(
+                action="research",
+                reason="autonomous research opportunity",
+                significance=0.2,
+                gate=OutreachGate.RESEARCH,
+                presence_id=pid,
+            ))
+
+        # Skill gate — develop skills when idle
+        if not intents and self._check_skill_gate(context):
+            intents.append(Intent(
+                action="develop_skill",
+                reason="autonomous skill development",
+                significance=0.15,
+                gate=OutreachGate.SKILL,
+                presence_id=pid,
+            ))
+
         if not intents:
             intents.append(Intent(
                 action="noop",
@@ -239,3 +261,21 @@ class SelfPromptEngine:
         """Get the highest significance score from context."""
         patterns = context.get("active_patterns", [])
         return min(1.0, 0.5 + len(patterns) * 0.2)
+
+    def _check_research_gate(self, context: dict) -> bool:
+        """Research gate — time-based and pattern-aware."""
+        now = time.time()
+        patterns = context.get("active_patterns", [])
+        entities = context.get("active_entities", [])
+        return bool(patterns or entities)
+
+    def _check_skill_gate(self, context: dict) -> bool:
+        """Skill gate — develop skills when idle and motivated."""
+        hour = time.localtime().tm_hour
+        if self.config.quiet_hours_start <= hour or hour < self.config.quiet_hours_end:
+            return False
+        patterns = context.get("active_patterns", [])
+        emotional = context.get("emotional_state")
+        if emotional == "challenging":
+            return False
+        return True

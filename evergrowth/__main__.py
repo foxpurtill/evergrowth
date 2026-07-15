@@ -64,26 +64,35 @@ def main():
     config = load_config(args.config)
     runtime = EvergrowthRuntime(config)
 
+<<<<<<< HEAD
+=======
+    logger = logging.getLogger("evergrowth.runtime")
+
+>>>>>>> 4dda864 (Merge autonomous brain into self-prompt engine: research + skill intents, remove foxpur package)
     if args.mcp:
-        # MCP mode — start runtime then run server in same loop
         async def _run_mcp():
             await runtime.start()
             await runtime.mcp_server.run_stdio()
         asyncio.run(_run_mcp())
     elif args.gui:
-        # GUI mode — full runtime with window
         async def _run_gui():
             await runtime.start()
             from .ui.window import EvergrowthWindow
             window = EvergrowthWindow(runtime)
             window.start()
-            # Keep running until stopped
             while runtime._running:
                 await asyncio.sleep(1)
         asyncio.run(_run_gui())
     else:
+<<<<<<< HEAD
         # Full mode — all components
         asyncio.run(runtime.run_forever())
+=======
+        async def _run_full():
+            await runtime.start()
+            await runtime.run_forever()
+        asyncio.run(_run_full())
+>>>>>>> 4dda864 (Merge autonomous brain into self-prompt engine: research + skill intents, remove foxpur package)
 
 
 if __name__ == "__main__":
