@@ -50,6 +50,14 @@ class MCPConfig:
 
 
 @dataclass
+class ExperimentConfig:
+    enabled: bool = True
+    ledger_path: str = "~/.evergrowth/experiments.jsonl"
+    default_budget_seconds: float = 300.0
+    max_experiments_per_cycle: int = 3
+
+
+@dataclass
 class SchedulerConfig:
     enabled: bool = True
     max_concurrent: int = 5
@@ -73,6 +81,7 @@ class EvergrowthConfig:
     identity: IdentityConfig = field(default_factory=IdentityConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    experiments: ExperimentConfig = field(default_factory=ExperimentConfig)
     tray: TrayConfig = field(default_factory=TrayConfig)
 
     def resolve_data_dir(self) -> Path:

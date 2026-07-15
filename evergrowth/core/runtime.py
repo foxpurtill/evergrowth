@@ -39,6 +39,7 @@ class EvergrowthRuntime:
         self.window = None
         self.di_loop = None
         self.self_prompt = None
+        self.experiments = None
 
     async def start(self):
         """Initialize and start all components."""
@@ -58,6 +59,7 @@ class EvergrowthRuntime:
         await self._init_identity()
         await self._init_skills()
         await self._init_self_prompt()
+        await self._init_experiments()
         await self._init_heartbeat()
         await self._init_scheduler()
         await self._init_mcp()
@@ -128,6 +130,15 @@ class EvergrowthRuntime:
         from ..selfprompt.engine import SelfPromptEngine
         self.self_prompt = SelfPromptEngine(self.memory)
         logger.info("Self-prompt engine initialized")
+
+    async def _init_experiments(self):
+        """Initialize the bounded experiment ledger and runner."""
+        if not self.config.experiments.enabled:
+            logger.info("Experiment runner disabled")
+            return
+        from ..experiments.runner import ExperimentRunner
+        self.experiments = ExperimentRunner(self.config.experiments.ledger_path)
+        logger.info("Bounded experiment runner initialized")
 
     async def _init_heartbeat(self):
         """Initialize the heartbeat engine."""

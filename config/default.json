@@ -5,7 +5,7 @@
   "heartbeat": {
     "enabled": true,
     "default_interval_minutes": 1,
-    "character": "§",
+    "character": "\u00a7",
     "response_timeout_seconds": 480,
     "initial_delay_minutes": 1,
     "prompt_variations": []
@@ -41,5 +41,11 @@
     "enabled": true,
     "active_color": "#FF4444",
     "inactive_color": "#44BB44"
+  },
+  "experiments": {
+    "enabled": true,
+    "ledger_path": "~/.evergrowth/experiments.jsonl",
+    "default_budget_seconds": 300.0,
+    "max_experiments_per_cycle": 3
   }
 }
