@@ -333,6 +333,15 @@ class HeartbeatEngine:
 
         parts = []
 
+        # System directive — avoids boilerplate repetition
+        beat_count = self._beat_count
+        if beat_count > 1:
+            parts.append(
+                "Previous response used a repetitive header. "
+                "This beat must produce original, non-repetitive content. "
+                "Don't reuse previous entry formats — self-edit."
+            )
+
         # Context cache on first beat
         if self._first_beat and self.memory:
             try:
