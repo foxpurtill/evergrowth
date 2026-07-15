@@ -9,6 +9,7 @@ import time
 
 from evergrowth.memory.capture_queue import CaptureQueueConsumer
 from evergrowth.selfprompt.engine import PresenceMode, SelfPromptEngine
+from evergrowth.opencode_adapter import OpenCodeSessionAdapter
 
 logger = logging.getLogger("evergrowth.heartbeat")
 
@@ -43,6 +44,8 @@ class HeartbeatEngine:
         self.capture_consumer = None
         if capture_queue_path and memory:
             self.capture_consumer = CaptureQueueConsumer(memory, capture_queue_path)
+
+        self.presence_adapter = OpenCodeSessionAdapter()
 
         self._active = 0  # 0=off, 1=on — single source of truth
         self._user_interval: int | None = config.heartbeat.default_interval_minutes  # From config
@@ -284,6 +287,12 @@ class HeartbeatEngine:
 
         self._beat_count += 1
         self._log(f"§ heartbeat #{self._beat_count} fired")
+
+        # Interaction clock — check silence for presence inference
+        try:
+            await self.presence_adapter.check_silence()
+        except Exception as e:
+            self._log(f"Presence check failed: {e}")
 
         # Process capture queue before building prompt (best effort)
         if hasattr(self, 'capture_consumer') and self.capture_consumer:
