@@ -1,4 +1,4 @@
-"""Self-prompt engine â€” autonomous direction-setting between sessions.
+"""Self-prompt engine — autonomous direction-setting between sessions.
 
 Two modes switched by presence events:
 - Away: quiet observation, suppressed outreach, adaptive heartbeat
@@ -9,6 +9,7 @@ Two outreach gates:
 - Relational: ordinary presence (hello, check-in, thought)
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -74,6 +75,7 @@ class SelfPromptEngine:
         self._relational_presence_ids: set[str] = set()
         self._relational_reservations: dict[str, float] = {}
         self._surfaced_significance_keys: set[str] = set()
+        self._save_lock = asyncio.Lock()
         self._load_state()
 
     def _load_state(self):
