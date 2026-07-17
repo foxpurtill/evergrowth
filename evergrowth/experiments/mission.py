@@ -27,12 +27,24 @@ class PriorityBoard:
         if not self.path.exists():
             return []
         data = json.loads(self.path.read_text(encoding="utf-8"))
-        return [Priority(**item) for item in data]
+        if not isinstance(data, list):
+            return []
+        priorities = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            try:
+                priorities.append(Priority(**item))
+            except TypeError:
+                continue
+        return priorities
 
     def save(self, priorities: list[Priority]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = [asdict(item) for item in priorities]
-        self.path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        temporary.replace(self.path)
 
     def active(self) -> list[Priority]:
         return sorted(
@@ -118,7 +130,14 @@ class LearningGovernor:
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if entry.get("spec", {}).get("name") == name:
+            if not isinstance(entry, dict):
+                continue
+            result = entry.get("result")
+            if (
+                entry.get("spec", {}).get("name") == name
+                and isinstance(result, dict)
+                and result.get("status") in {"keep", "discard", "crash"}
+            ):
                 entries.append(entry)
         return entries
 

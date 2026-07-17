@@ -37,6 +37,11 @@ def run(role: str, extra_args: list[str] | None = None) -> int:
     finally:
         if process.poll() is None:
             process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
         lease.release()
 
 

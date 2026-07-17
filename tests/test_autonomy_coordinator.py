@@ -20,6 +20,11 @@ class MemoryStub:
         return 1
 
 
+class FailingMemoryStub:
+    async def store(self, content, **kwargs):
+        raise RuntimeError("memory unavailable")
+
+
 def intent(action="research"):
     return Intent(action, "test", 0.2, OutreachGate.RESEARCH)
 
@@ -145,6 +150,58 @@ async def test_internal_direct_action_runs_without_experiment_ceremony(tmp_path)
     assert result["lane"] == ActionLane.ACT.value
     assert state["ran"] is True
     assert memory.items and "organize notes" in memory.items[0][0]
+
+
+@pytest.mark.asyncio
+async def test_direct_action_memory_failure_does_not_mask_completed_action(tmp_path):
+    state = {"count": 0}
+    registry = ExperimentRegistry()
+
+    def act():
+        state["count"] += 1
+
+    registry.register_action("once", act)
+    coordinator = AutonomyCoordinator(
+        ExperimentRunner(tmp_path / "ledger.jsonl"),
+        memory=FailingMemoryStub(),
+        registry=registry,
+    )
+    result = await coordinator.handle_intent(
+        intent(),
+        {"action_candidate": {"name": "run once", "action_id": "once"}},
+    )
+    assert result["status"] == "completed"
+    assert state["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_experiment_memory_failure_does_not_mask_completed_result(tmp_path):
+    state = {"score": 10.0}
+    registry = ExperimentRegistry()
+    registry.register_action("improve", lambda: state.update(score=8.0))
+    registry.register_evaluator("score", lambda: state["score"])
+    registry.register_rollback("undo", lambda: state.update(score=10.0))
+    coordinator = AutonomyCoordinator(
+        ExperimentRunner(tmp_path / "ledger.jsonl"),
+        memory=FailingMemoryStub(),
+        registry=registry,
+    )
+    result = await coordinator.handle_intent(
+        intent(),
+        {"experiment_candidate": {
+            "name": "improve score",
+            "hypothesis": "score improves",
+            "metric_name": "score",
+            "evaluator_id": "score",
+            "action_id": "improve",
+            "rollback_id": "undo",
+            "baseline": 10.0,
+            "minimum_improvement": 1.0,
+            "side_effects": ["local_files"],
+        }},
+    )
+    assert result["status"] == "completed"
+    assert state["score"] == 8.0
 
 
 @pytest.mark.asyncio

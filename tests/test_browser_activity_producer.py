@@ -1,4 +1,6 @@
 import importlib.util
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 PRODUCER_PATH = Path(__file__).parents[1] / "deploy" / "browser_activity_producer.py"
@@ -8,41 +10,20 @@ assert SPEC and SPEC.loader
 SPEC.loader.exec_module(producer)
 
 
-def test_matching_chatgpt_conversation_counts_as_activity():
-    assert producer.is_chatgpt_window(
-        "chrome.exe",
-        "Browser Presence Detection - Google Chrome",
-        idle_seconds=3,
-        max_idle_seconds=60,
-        title_substring="Browser Presence Detection",
+def test_reads_latest_real_chat_activity(tmp_path):
+    source = tmp_path / "chat_activity.json"
+    source.write_text(json.dumps({
+        "last_begin": "2026-07-16T08:10:00+00:00",
+        "last_end": "2026-07-16T08:11:30+00:00",
+    }), encoding="utf-8")
+    assert producer.read_latest_activity(source) == datetime(
+        2026, 7, 16, 8, 11, 30, tzinfo=UTC
     )
 
 
-def test_other_browser_tab_does_not_count_as_chatgpt_activity():
-    assert not producer.is_chatgpt_window(
-        "chrome.exe",
-        "Discord - Google Chrome",
-        idle_seconds=3,
-        max_idle_seconds=60,
-        title_substring="Browser Presence Detection",
-    )
-
-
-def test_non_browser_application_does_not_count_as_chatgpt_activity():
-    assert not producer.is_chatgpt_window(
-        "telegram.exe",
-        "Telegram",
-        idle_seconds=3,
-        max_idle_seconds=60,
-        title_substring="Browser Presence Detection",
-    )
-
-
-def test_idle_chatgpt_window_does_not_refresh_activity():
-    assert not producer.is_chatgpt_window(
-        "msedge.exe",
-        "Browser Presence Detection - Microsoft Edge",
-        idle_seconds=61,
-        max_idle_seconds=60,
-        title_substring="Browser Presence Detection",
-    )
+def test_missing_or_invalid_activity_returns_none(tmp_path):
+    missing = tmp_path / "missing.json"
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("not-json", encoding="utf-8")
+    assert producer.read_latest_activity(missing) is None
+    assert producer.read_latest_activity(invalid) is None

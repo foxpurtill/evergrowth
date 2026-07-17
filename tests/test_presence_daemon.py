@@ -112,3 +112,68 @@ def test_build_return_conversation_captures_visible_channel_messages(
     assert event["dedup_key"] == "conversation.bridge:presence-1"
     assert len(event["messages"]) == 2
     assert "Patricia: I'm back soon" in event["topics"][0]
+
+
+@pytest.mark.asyncio
+async def test_pending_delivery_suppresses_duplicate_after_restart(monkeypatch):
+    presence_id = "presence-uncertain"
+    event = {"event": "presence.away", "presence_id": presence_id}
+    state = {
+        "sync_key": f"presence.away:{presence_id}",
+        "delivery_pending_key": f"delivered:{presence_id}",
+        "delivery_pending_at": daemon.datetime.now().astimezone().isoformat(),
+    }
+    deliveries = []
+
+    monkeypatch.setattr(daemon, "parse_handoff", lambda: {"status": "active"})
+    monkeypatch.setattr(daemon, "build_event", lambda handoff: event)
+    monkeypatch.setattr(daemon, "build_return_conversation", lambda handoff, evt: {})
+    monkeypatch.setattr(daemon, "load_state", lambda: dict(state))
+    monkeypatch.setattr(daemon, "save_state", lambda value: None)
+    monkeypatch.setattr(daemon, "deliver_check_in", lambda decision: deliveries.append(decision))
+
+    async def fake_mcp_call(tool, arguments):
+        assert tool == "heartbeat_evaluate"
+        return {
+            "presence_id": presence_id,
+            "intents": [{"action": "check_in", "is_noop": False}],
+        }
+
+    monkeypatch.setattr(daemon, "mcp_call", fake_mcp_call)
+
+    await daemon.run_once()
+
+    assert deliveries == []
+
+
+@pytest.mark.asyncio
+async def test_expired_pending_delivery_is_released_and_retried(monkeypatch):
+    presence_id = "presence-expired"
+    event = {"event": "presence.away", "presence_id": presence_id}
+    state = {
+        "sync_key": f"presence.away:{presence_id}",
+        "delivery_pending_key": f"delivered:{presence_id}",
+        "delivery_pending_at": "2000-01-01T00:00:00+00:00",
+    }
+    deliveries = []
+    calls = []
+
+    monkeypatch.setattr(daemon, "parse_handoff", lambda: {"status": "active"})
+    monkeypatch.setattr(daemon, "build_event", lambda handoff: event)
+    monkeypatch.setattr(daemon, "build_return_conversation", lambda handoff, evt: {})
+    monkeypatch.setattr(daemon, "load_state", lambda: dict(state))
+    monkeypatch.setattr(daemon, "save_state", lambda value: None)
+    monkeypatch.setattr(daemon, "deliver_check_in", lambda decision: deliveries.append(decision))
+
+    async def fake_mcp_call(tool, arguments):
+        calls.append((tool, arguments))
+        if tool == "heartbeat_evaluate":
+            return {"presence_id": presence_id, "intents": [{"action": "check_in", "is_noop": False}]}
+        return {"status": "ok"}
+
+    monkeypatch.setattr(daemon, "mcp_call", fake_mcp_call)
+    await daemon.run_once()
+
+    assert len(deliveries) == 1
+    assert ("heartbeat_record_delivery", {"presence_id": presence_id, "delivered": False}) in calls
+    assert ("heartbeat_record_delivery", {"presence_id": presence_id, "delivered": True}) in calls

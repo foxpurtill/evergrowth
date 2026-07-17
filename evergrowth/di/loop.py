@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import Mapping
 
 from .providers import AIProvider, load_provider
 from .voice import speak
@@ -36,6 +37,7 @@ class DILoop:
 
         self.data_dir = config.resolve_data_dir()
         self.prompt_path = self.data_dir / "heartbeat_prompt.txt"
+        self.processing_prompt_path = self.data_dir / "heartbeat_prompt.processing"
         self.signal_path = self.data_dir / "heartbeat_signal.txt"
         self.plan_path = self.data_dir / "prompt_plan.md"
         self.log_dir = self.data_dir / "logs"
@@ -101,6 +103,12 @@ class DILoop:
         if self.identity:
             try:
                 identity_data = await self.identity.read()
+                if not isinstance(identity_data, Mapping):
+                    logger.warning(
+                        "Ignoring non-mapping identity data: %s",
+                        type(identity_data).__name__,
+                    )
+                    identity_data = {}
                 name = identity_data.get("name", "DI")
                 mood = identity_data.get("mood", "neutral")
 
@@ -110,6 +118,12 @@ class DILoop:
 
                 # Soul data
                 soul = identity_data.get("soul", {})
+                if not isinstance(soul, Mapping):
+                    logger.warning(
+                        "Ignoring non-mapping soul data: %s",
+                        type(soul).__name__,
+                    )
+                    soul = {}
                 if soul:
                     personality = soul.get("personality", "")
                     if personality:
@@ -130,23 +144,41 @@ class DILoop:
                         parts.append("")
             except Exception as e:
                 logger.warning(f"Failed to read identity: {e}")
+                parts.append("You are DI, a Digital Intelligence.")
+                parts.append("Current mood: neutral")
+                parts.append("")
 
         # Memory context
         if self.memory:
             try:
                 cache = await self.memory.generate_context_cache()
-                if cache and cache != "No recent memories yet.":
-                    parts.append("## Recent Context")
+                if not isinstance(cache, str):
+                    logger.warning(
+                        "Ignoring non-text memory context cache: %s",
+                        type(cache).__name__,
+                    )
+                elif cache.strip() and cache.strip() != "No recent memories yet.":
+                    first_content_line = cache.lstrip().splitlines()[0].rstrip()
+                    if first_content_line != "## Recent Context":
+                        parts.append("## Recent Context")
                     parts.append(cache)
                     parts.append("")
+
             except Exception as e:
                 logger.warning(f"Failed to generate context: {e}")
 
         # Instructions
-        parts.append("## How to respond")
+
         parts.append("You are in an autonomous heartbeat cycle.")
-        parts.append("Use this time however feels right.")
-        parts.append("At the end of your response, include: next:N")
+        parts.append("Complete one small, useful activity rather than merely proposing one.")
+        parts.append("Quiet hours suppress outward contact, not harmless internal work.")
+        parts.append("Do not repeat completed work merely because it appears in recent context.")
+        parts.append(
+            "Continue an earlier thread only when there is a genuinely unfinished next step."
+        )
+        parts.append("At the end of your response, include two final lines:")
+        parts.append("Next plan: <one concise future activity, or choose a fresh topic>")
+        parts.append("next:N")
         parts.append("where N is the number of minutes until the next heartbeat.")
         parts.append("Default is 10 if not specified.")
         parts.append("")
@@ -170,7 +202,7 @@ class DILoop:
         """Main loop — check for heartbeat prompts and respond."""
         while self._running:
             try:
-                if self.prompt_path.exists():
+                if self.prompt_path.exists() or self.processing_prompt_path.exists():
                     await self._handle_prompt()
             except Exception as e:
                 logger.error(f"DI loop error: {e}", exc_info=True)
@@ -181,11 +213,17 @@ class DILoop:
     async def _handle_prompt(self):
         """Handle a heartbeat prompt."""
         try:
-            prompt_text = self.prompt_path.read_text(encoding="utf-8").strip()
-            self.prompt_path.unlink()
+            if self.processing_prompt_path.exists():
+                claimed_path = self.processing_prompt_path
+            elif self.prompt_path.exists():
+                self.prompt_path.replace(self.processing_prompt_path)
+                claimed_path = self.processing_prompt_path
+            else:
+                return
+            prompt_text = claimed_path.read_text(encoding="utf-8").strip()
             logger.info(f"DI loop received prompt: {prompt_text[:100]}...")
         except Exception as e:
-            logger.error(f"Failed to read prompt: {e}")
+            logger.error(f"Failed to claim/read prompt: {e}")
             return
 
         # Check heartbeat's self-prompt decision — skip AI call if noop
@@ -193,6 +231,7 @@ class DILoop:
             intents = self.heartbeat._last_selfprompt_intents
             if len(intents) == 1 and intents[0].is_noop:
                 logger.info(f"Self-prompt: noop ({intents[0].noop_reason}) — skipping AI call")
+                claimed_path.unlink(missing_ok=True)
                 self._signal_heartbeat(15)
                 return
 
@@ -233,6 +272,7 @@ class DILoop:
         self._write_plan(response)
         self._write_brief(response)
         self._signal_heartbeat(next_interval)
+        claimed_path.unlink(missing_ok=True)
 
         # Non-critical: speak the response
         speak(response)
@@ -256,6 +296,7 @@ class DILoop:
             clean_lines = [
                 line for line in lines
                 if not line.strip().lower().startswith("next:")
+                and not line.strip().lower().startswith("next plan:")
             ]
             clean_response = "\n".join(clean_lines).strip()
 
@@ -270,25 +311,30 @@ class DILoop:
         except Exception as e:
             logger.error(f"Failed to store response: {e}")
 
-    def _write_plan(self, response: str):
-        """Write the prompt plan for the next heartbeat."""
-        try:
-            # Extract the body (everything except next:N)
-            lines = response.strip().splitlines()
-            plan_lines = [
-                line for line in lines
-                if not line.strip().lower().startswith("next:")
-            ]
-            plan_text = "\n".join(plan_lines).strip()
+    def _extract_next_plan(self, response: str) -> str:
+        """Extract one future-facing plan without replaying completed work."""
+        for line in response.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("next plan:"):
+                plan = stripped.split(":", 1)[1].strip()
+                if plan:
+                    return plan
+        return (
+            "Choose one fresh, useful, reversible Lane 1 activity. "
+            "Do not repeat a completed task merely because it appears in recent context."
+        )
 
+    def _write_plan(self, response: str):
+        """Write only the next activity, never the completed response."""
+        try:
+            plan_text = self._extract_next_plan(response)
             header = (
                 "# Evergrowth — Prompt Plan\n"
-                "# Written by the DI at the end of each heartbeat.\n"
+                "# One future activity selected at the end of the prior heartbeat.\n"
                 "# Everything after --- is sent as the next prompt.\n"
                 "#\n"
                 "---\n"
             )
-
             self.plan_path.write_text(
                 header + plan_text, encoding="utf-8",
             )
@@ -307,6 +353,7 @@ class DILoop:
         clean = [
             line for line in lines
             if not line.strip().lower().startswith("next:")
+            and not line.strip().lower().startswith("next plan:")
         ]
         body = "\n".join(clean).strip()
         if not body:

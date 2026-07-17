@@ -80,3 +80,17 @@ def test_generator_selects_highest_weight_active_signal(tmp_path):
     proposal, reason = generator.generate(signals)
     assert proposal.name == "presence-dedup"
     assert "learning budget" in reason
+
+
+def test_governor_ignores_incomplete_nonterminal_records(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    entries = [
+        {"spec": {"name": "dedup"}, "metadata": {"phase": "started"}},
+        {"spec": {"name": "dedup"}, "result": {}},
+    ]
+    ledger.write_text("\n".join(json.dumps(item) for item in entries), encoding="utf-8")
+    governor = LearningGovernor(ledger, max_attempts_per_name=1)
+    proposal = type("P", (), {"name": "dedup", "metric_name": "duplicates"})()
+    allowed, reason = governor.evaluate(proposal)
+    assert allowed
+    assert "learning budget" in reason

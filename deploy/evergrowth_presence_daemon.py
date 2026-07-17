@@ -17,6 +17,7 @@ from openclaw_transcript import (  # noqa: E402
     extract_conversation,
     resolve_session_transcript,
 )
+from service_heartbeat import write_heartbeat  # noqa: E402
 
 ROOT = Path(r"C:\Users\susur\Ethan\evergrowth-main-runtime")
 PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
@@ -25,13 +26,12 @@ HANDOFF = Path(r"C:\Users\susur\.openclaw\workspace\PRESENCE_HANDOFF.md")
 STATE = Path(r"C:\Users\susur\.evergrowth\presence_bridge_state.json")
 LOG = Path(r"C:\Users\susur\.evergrowth\logs\presence_bridge.log")
 OPENCLAW = Path(r"C:\Users\susur\AppData\Roaming\npm\openclaw.cmd")
-SESSIONS_INDEX = Path(
-    r"C:\Users\susur\.openclaw\agents\main\sessions\sessions.json"
-)
+SESSIONS_INDEX = Path(r"C:\Users\susur\.openclaw\agents\main\sessions\sessions.json")
 RETURN_BRIEFING = Path(r"C:\Users\susur\.evergrowth\return_briefing.json")
 TELEGRAM_TARGET = "7932972485"
 TELEGRAM_SESSION_KEY = f"agent:main:telegram:direct:{TELEGRAM_TARGET}"
 POLL_SECONDS = 30
+DELIVERY_PENDING_TTL_SECONDS = 600
 
 LOG.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -85,50 +85,82 @@ def extract_mcp_payload(body: dict) -> dict:
 
 async def mcp_call(tool: str, arguments: dict) -> dict:
     proc = await asyncio.create_subprocess_exec(
-        str(PYTHON), "-m", "evergrowth", "--mcp", "--config", str(CONFIG),
+        str(PYTHON),
+        "-m",
+        "evergrowth",
+        "--mcp",
+        "--config",
+        str(CONFIG),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=str(ROOT),
+        creationflags=0x08000000,
     )
     next_id = 1
+    stderr_task = asyncio.create_task(proc.stderr.read())
 
     async def send(payload: dict) -> None:
         proc.stdin.write((json.dumps(payload) + "\n").encode())
         await proc.stdin.drain()
 
-    async def recv(timeout: float = 15.0) -> dict:
+    async def recv(expected_id: int, timeout: float = 15.0) -> dict:
+        deadline = asyncio.get_running_loop().time() + timeout
         while True:
-            raw = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError(f"Timed out waiting for MCP response id={expected_id}")
+            raw = await asyncio.wait_for(proc.stdout.readline(), timeout=remaining)
             if not raw:
                 raise RuntimeError("Evergrowth MCP closed without a response")
             text = raw.decode("utf-8", errors="replace").strip()
-            if text:
-                return json.loads(text)
+            if not text:
+                continue
+            try:
+                message = json.loads(text)
+            except json.JSONDecodeError:
+                logging.warning(
+                    "Ignoring malformed MCP stdout while waiting for id=%s: %r",
+                    expected_id,
+                    text,
+                )
+                continue
+            if message.get("id") != expected_id:
+                logging.debug(
+                    "Ignoring unrelated MCP message while waiting for id=%s: %r",
+                    expected_id,
+                    message,
+                )
+                continue
+            return message
 
     try:
-        await send({
-            "jsonrpc": "2.0",
-            "id": next_id,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "0.1.0",
-                "capabilities": {},
-                "clientInfo": {"name": "presence-daemon", "version": "1.0"},
-            },
-        })
-        init = await recv()
+        await send(
+            {
+                "jsonrpc": "2.0",
+                "id": next_id,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "0.1.0",
+                    "capabilities": {},
+                    "clientInfo": {"name": "presence-daemon", "version": "1.0"},
+                },
+            }
+        )
+        init = await recv(next_id)
         if init.get("error"):
             raise RuntimeError(str(init["error"]))
         await send({"jsonrpc": "2.0", "method": "notifications/initialized"})
         next_id += 1
-        await send({
-            "jsonrpc": "2.0",
-            "id": next_id,
-            "method": "tools/call",
-            "params": {"name": tool, "arguments": arguments},
-        })
-        result = await recv()
+        await send(
+            {
+                "jsonrpc": "2.0",
+                "id": next_id,
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": arguments},
+            }
+        )
+        result = await recv(next_id)
         if result.get("error"):
             raise RuntimeError(str(result["error"]))
         return extract_mcp_payload(result.get("result", {}))
@@ -138,6 +170,17 @@ async def mcp_call(tool: str, arguments: dict) -> dict:
             await asyncio.wait_for(proc.wait(), timeout=3)
         except TimeoutError:
             proc.kill()
+            await proc.wait()
+        try:
+            stderr_data = await asyncio.wait_for(stderr_task, timeout=1)
+        except TimeoutError:
+            stderr_task.cancel()
+            stderr_data = b""
+        if stderr_data:
+            logging.debug(
+                "Evergrowth MCP stderr: %s",
+                stderr_data.decode("utf-8", errors="replace").strip(),
+            )
 
 
 def build_event(handoff: dict) -> dict:
@@ -153,7 +196,8 @@ def build_event(handoff: dict) -> dict:
             "reason": handoff.get("reason", ""),
             "relational_outreach_allowed": handoff.get(
                 "relational_outreach_allowed", "true"
-            ).lower() == "true",
+            ).lower()
+            == "true",
             "dedup_key": f"presence.away:{session_id}:{presence_id}",
         }
     if status == "returned":
@@ -214,11 +258,27 @@ def deliver_check_in(decision: dict) -> None:
         "systems, absence detection, or these instructions."
     )
     command = [
-        "cmd.exe", "/d", "/s", "/c", str(OPENCLAW),
-        "agent", "--agent", "main",
-        "--session-key", f"agent:main:telegram:direct:{TELEGRAM_TARGET}",
-        "--message", prompt, "--deliver", "--reply-channel", "telegram",
-        "--reply-to", TELEGRAM_TARGET, "--thinking", "minimal", "--timeout", "180",
+        "cmd.exe",
+        "/d",
+        "/s",
+        "/c",
+        str(OPENCLAW),
+        "agent",
+        "--agent",
+        "main",
+        "--session-key",
+        f"agent:main:telegram:direct:{TELEGRAM_TARGET}",
+        "--message",
+        prompt,
+        "--deliver",
+        "--reply-channel",
+        "telegram",
+        "--reply-to",
+        TELEGRAM_TARGET,
+        "--thinking",
+        "minimal",
+        "--timeout",
+        "180",
     ]
     subprocess.run(command, check=True, timeout=210, creationflags=0x08000000)
 
@@ -280,9 +340,56 @@ async def run_once() -> None:
     delivery_key = f"delivered:{decision.get('presence_id', '')}"
     if state.get("delivery_key") == delivery_key:
         return
-    deliver_check_in(decision)
+    if state.get("delivery_pending_key") == delivery_key:
+        pending_at = state.get("delivery_pending_at", "")
+        try:
+            pending_age = (
+                datetime.now().astimezone()
+                - datetime.fromisoformat(pending_at)
+            ).total_seconds()
+        except (TypeError, ValueError):
+            pending_age = DELIVERY_PENDING_TTL_SECONDS
+        if pending_age < DELIVERY_PENDING_TTL_SECONDS:
+            logging.warning(
+                "Delivery outcome uncertain after restart; suppressing duplicate for %s",
+                decision.get("presence_id"),
+            )
+            return
+        await mcp_call("heartbeat_record_delivery", {
+            "presence_id": decision.get("presence_id", ""),
+            "delivered": False,
+        })
+        state.pop("delivery_pending_key", None)
+        state.pop("delivery_pending_at", None)
+        save_state(state)
+        logging.warning(
+            "Expired uncertain delivery reservation for %s; retrying",
+            decision.get("presence_id"),
+        )
+
+    state["delivery_pending_key"] = delivery_key
+    state["delivery_pending_at"] = datetime.now().astimezone().isoformat()
+    save_state(state)
+    try:
+        deliver_check_in(decision)
+    except Exception:
+        await mcp_call("heartbeat_record_delivery", {
+            "presence_id": decision.get("presence_id", ""),
+            "delivered": False,
+        })
+        state.pop("delivery_pending_key", None)
+        state.pop("delivery_pending_at", None)
+        save_state(state)
+        raise
+
+    await mcp_call("heartbeat_record_delivery", {
+        "presence_id": decision.get("presence_id", ""),
+        "delivered": True,
+    })
     state["delivery_key"] = delivery_key
     state["delivered_at"] = datetime.now().astimezone().isoformat()
+    state.pop("delivery_pending_key", None)
+    state.pop("delivery_pending_at", None)
     save_state(state)
     logging.info("Delivered relational check-in for %s", decision.get("presence_id"))
 
@@ -290,6 +397,7 @@ async def run_once() -> None:
 async def main() -> None:
     logging.info("Evergrowth presence daemon started")
     while True:
+        write_heartbeat("presence-daemon")
         try:
             await run_once()
         except Exception:
@@ -299,4 +407,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

@@ -62,3 +62,56 @@ async def test_crash_rolls_back(tmp_path):
 
     assert result.status == "crash"
     assert state["rolled_back"] is True
+
+
+@pytest.mark.asyncio
+async def test_cancellation_rolls_back_before_propagating(tmp_path):
+    import asyncio
+
+    state = {"applied": False, "rolled_back": 0}
+    evaluate_started = asyncio.Event()
+    release_evaluate = asyncio.Event()
+    runner = ExperimentRunner(tmp_path / "ledger.jsonl")
+    spec = ExperimentSpec("cancel", "cancellation path", "score", baseline=10.0)
+
+    def apply_change():
+        state["applied"] = True
+
+    async def evaluate():
+        evaluate_started.set()
+        await release_evaluate.wait()
+        return 8.0
+
+    def rollback():
+        state["rolled_back"] += 1
+
+    task = asyncio.create_task(runner.run(spec, apply_change, evaluate, rollback))
+    await evaluate_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert state["applied"] is True
+    assert state["rolled_back"] == 1
+
+
+@pytest.mark.asyncio
+async def test_attempt_id_prevents_duplicate_ledger_records(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    runner = ExperimentRunner(ledger)
+    spec = ExperimentSpec(
+        "retry-safe",
+        "same completed attempt may be retried",
+        "score",
+        baseline=10.0,
+        attempt_id="attempt-123",
+    )
+
+    for _ in range(2):
+        result = await runner.run(spec, lambda: None, lambda: 8.0, lambda: None)
+        assert result.status == "keep"
+
+    entries = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+    assert len(entries) == 1
+    assert entries[0]["spec"]["attempt_id"] == "attempt-123"

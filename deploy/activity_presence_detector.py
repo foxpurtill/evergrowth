@@ -1,14 +1,21 @@
-﻿"""Convert local browser activity timestamps into presence handoff transitions."""
+"""Convert local browser activity timestamps into presence handoff transitions."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
+
+DEPLOY_DIR = Path(__file__).resolve().parent
+if str(DEPLOY_DIR) not in sys.path:
+    sys.path.insert(0, str(DEPLOY_DIR))
+
+from service_heartbeat import write_heartbeat
 
 DEFAULT_ACTIVITY = Path(r"C:\Users\susur\.evergrowth\browser_activity.json")
 DEFAULT_STATE = Path(r"C:\Users\susur\.evergrowth\activity_presence_state.json")
@@ -85,21 +92,23 @@ def write_handoff(
     ]
     if returned_at:
         lines.append(f"Returned-at: {returned_at}")
-    lines.extend([
-        "Reason: automatic-browser-inactivity",
-        "Source: activity_presence_detector.py",
-        "Outreach policy: relational-or-operational",
-        "Relational outreach allowed: true",
-        "Maximum relational messages per absence: 1",
-        "",
-        (
-            "Instruction: On heartbeat, assess both operational significance and ordinary "
-            "relational presence. A brief warm hello is allowed when timing feels natural. "
-            "Avoid guilt, pressure, repetition, or manufactured urgency."
-            if status == "active"
-            else "Return instruction: create the cross-channel return briefing."
-        ),
-    ])
+    lines.extend(
+        [
+            "Reason: automatic-browser-inactivity",
+            "Source: activity_presence_detector.py",
+            "Outreach policy: relational-or-operational",
+            "Relational outreach allowed: true",
+            "Maximum relational messages per absence: 1",
+            "",
+            (
+                "Instruction: On heartbeat, assess both operational significance and ordinary "
+                "relational presence. A brief warm hello is allowed when timing feels natural. "
+                "Avoid guilt, pressure, repetition, or manufactured urgency."
+                if status == "active"
+                else "Return instruction: create the cross-channel return briefing."
+            ),
+        ]
+    )
     atomic_write(path, "\n".join(lines) + "\n")
 
 
@@ -192,6 +201,7 @@ def run(
     away_after = timedelta(seconds=away_seconds)
     return_freshness = timedelta(seconds=return_freshness_seconds)
     while True:
+        write_heartbeat("activity-presence-detector")
         run_once(activity_path, state_path, handoff_path, away_after, return_freshness)
         time.sleep(poll_seconds)
 

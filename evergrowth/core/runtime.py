@@ -45,8 +45,13 @@ class EvergrowthRuntime:
         self.telemetry = None
         self.deployment = None
 
-    async def start(self):
-        """Initialize and start all components."""
+    async def start(self, *, persistent: bool = True):
+        """Initialize components, optionally enabling the persistent autonomy loop.
+
+        MCP helper processes need access to state and tools, but must not schedule
+        heartbeats or start a competing DI loop. Only the full persistent runtime
+        may own those autonomous services.
+        """
         logger.info(f"Evergrowth starting — DI: {self.config.di_name}")
         self._running = True
         self._loop = asyncio.get_running_loop()
@@ -67,6 +72,10 @@ class EvergrowthRuntime:
         await self._init_autonomy()
         await self._init_live_telemetry()
         await self._init_heartbeat()
+        if persistent and self.config.heartbeat.enabled:
+            self.heartbeat.start()
+        elif self.config.heartbeat.enabled:
+            logger.info("Heartbeat scheduling suppressed for non-persistent runtime")
         await self._init_scheduler()
         await self._init_mcp()
 
@@ -74,8 +83,11 @@ class EvergrowthRuntime:
         if self.config.tray.enabled:
             self._init_tray()
 
-        # Initialize DI loop if configured
-        await self._init_di_loop()
+        # Initialize the DI loop only for the one persistent runtime.
+        if persistent:
+            await self._init_di_loop()
+        else:
+            logger.info("DI loop suppressed for non-persistent runtime")
 
         logger.info("Evergrowth started — all components initialized")
 

@@ -32,7 +32,7 @@ def test_away_significance_is_surfaced_only_once_per_absence(tmp_path):
     context = significant_context("absence-1")
 
     assert select(engine, context).action == "surface"
-    assert select(engine, context).action == "noop"
+    assert select(engine, context).action == "research"
 
 
 def test_significance_suppression_survives_restart(tmp_path):
@@ -43,7 +43,7 @@ def test_significance_suppression_survives_restart(tmp_path):
     assert select(first, context).action == "surface"
 
     restarted = make_engine(state_path)
-    assert select(restarted, context).action == "noop"
+    assert select(restarted, context).action == "research"
 
 
 def test_same_context_can_surface_in_a_new_absence(tmp_path):
@@ -51,3 +51,15 @@ def test_same_context_can_surface_in_a_new_absence(tmp_path):
 
     assert select(engine, significant_context("absence-1")).action == "surface"
     assert select(engine, significant_context("absence-2")).action == "surface"
+
+
+def test_return_significance_is_surfaced_only_once_per_presence(tmp_path):
+    engine = SelfPromptEngine(
+        memory=None,
+        config=SelfPromptConfig(state_path=str(tmp_path / "return-state.json")),
+    )
+    engine.set_mode(PresenceMode.RETURN)
+    context = significant_context("return-1")
+
+    assert select(engine, context).action == "surface"
+    assert select(engine, context).action != "surface"

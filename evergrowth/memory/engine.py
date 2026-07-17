@@ -28,6 +28,14 @@ class MemoryEngine:
         self.db_path = config.resolve_memory_path()
         self.db: aiosqlite.Connection | None = None
 
+    @staticmethod
+    def _decode_json_field(value, expected_type, default):
+        try:
+            decoded = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return default
+        return decoded if isinstance(decoded, expected_type) else default
+
     async def initialize(self):
         """Create database and tables if they don't exist."""
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -285,7 +293,7 @@ class MemoryEngine:
                     "content": row[1],
                     "category": row[2],
                     "importance": row[3],
-                    "tags": json.loads(row[4]),
+                    "tags": self._decode_json_field(row[4], list, []),
                     "created_at": row[5],
                 }
                 for row in rows
@@ -319,7 +327,7 @@ class MemoryEngine:
                     "content": row[1],
                     "category": row[2],
                     "importance": row[3],
-                    "tags": json.loads(row[4]),
+                    "tags": self._decode_json_field(row[4], list, []),
                     "created_at": row[5],
                 }
                 for row in rows
@@ -450,7 +458,7 @@ class MemoryEngine:
                     "from": row[0],
                     "type": row[1],
                     "to": row[2],
-                    "properties": json.loads(row[3]),
+                    "properties": self._decode_json_field(row[3], dict, {}),
                 }
                 for row in rows
             ]

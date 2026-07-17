@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import time
+from contextlib import contextmanager
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 
 from .runner import ExperimentResult, ExperimentRunner, ExperimentSpec
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -32,6 +37,7 @@ class ExperimentProposal:
     privacy_sensitive: bool = False
     affects_others: bool = False
     source_intent: str = ""
+    attempt_id: str = ""
 
 
 @dataclass
@@ -168,6 +174,7 @@ class AutonomyCoordinator:
             lower_is_better=proposal.lower_is_better,
             budget_seconds=proposal.budget_seconds,
             minimum_improvement=proposal.minimum_improvement,
+            attempt_id=proposal.attempt_id,
         )
         result = await self.runner.run(
             spec,
@@ -208,13 +215,16 @@ class AutonomyCoordinator:
                 "reason": f"missing action adapter: {request.action_id}",
             }
         await ExperimentRunner._call(action)
-        if self.memory is not None and hasattr(self.memory, "store"):
-            await self.memory.store(
-                f"Autonomous action {request.name}: completed; {request.reason}",
-                category="autonomy",
-                importance=5,
-                tags=["autonomy", request.source_intent, decision.lane.value],
-            )
+        try:
+            if self.memory is not None and hasattr(self.memory, "store"):
+                await self.memory.store(
+                    f"Autonomous action {request.name}: completed; {request.reason}",
+                    category="autonomy",
+                    importance=5,
+                    tags=["autonomy", request.source_intent, decision.lane.value],
+                )
+        except Exception as exc:
+            logger.warning("Action done but memory recording failed: %s", exc)
         return {"status": "completed", "lane": decision.lane.value, "action": asdict(request)}
 
     def propose(self, intent, context: dict) -> ExperimentProposal | None:
@@ -237,6 +247,7 @@ class AutonomyCoordinator:
             "lower_is_better",
             "minimum_improvement",
             "budget_seconds",
+            "attempt_id",
             "risk",
             "side_effects",
             "external",
@@ -258,12 +269,63 @@ class AutonomyCoordinator:
             f"{proposal.metric_name} {result.baseline} -> {result.measured}; "
             f"improvement={result.improvement}; {result.note}"
         )
-        await self.memory.store(
-            content,
-            category="experiment",
-            importance=7,
-            tags=["autonomy", proposal.source_intent, result.status],
-        )
+        try:
+            await self.memory.store(
+                content,
+                category="experiment",
+                importance=7,
+                tags=["autonomy", proposal.source_intent, result.status],
+            )
+        except Exception as exc:
+            logger.warning("Experiment done but memory recording failed: %s", exc)
+
+    @contextmanager
+    def _proposal_log_lock(self, timeout_seconds: float = 5.0):
+        lock_path = self.proposal_log_path.with_suffix(self.proposal_log_path.suffix + ".lock")
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(descriptor, str(os.getpid()).encode("ascii"))
+                os.close(descriptor)
+                break
+            except FileExistsError:
+                try:
+                    owner_pid = int(lock_path.read_text(encoding="ascii"))
+                except (OSError, ValueError):
+                    owner_pid = 0
+                owner_alive = False
+                if owner_pid > 0:
+                    try:
+                        os.kill(owner_pid, 0)
+                        owner_alive = True
+                    except OSError:
+                        pass
+                try:
+                    lock_age = max(0.0, time.time() - lock_path.stat().st_mtime)
+                except OSError:
+                    lock_age = 0.0
+                if (owner_pid > 0 and not owner_alive) or (owner_pid == 0 and lock_age > 5.0):
+                    try:
+                        lock_path.unlink(missing_ok=True)
+                    except PermissionError:
+                        time.sleep(0.01)
+                    continue
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("proposal log is busy")
+                time.sleep(0.01)
+        try:
+            yield
+        finally:
+            deadline = time.monotonic() + 1.0
+            while True:
+                try:
+                    lock_path.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.01)
 
     def _log_proposal(self, proposal: ExperimentProposal, decision: GateDecision) -> None:
         self.proposal_log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -272,5 +334,13 @@ class AutonomyCoordinator:
             "decision": {**asdict(decision), "lane": decision.lane.value},
             "recorded_at": time.time(),
         }
-        with self.proposal_log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with self._proposal_log_lock():
+            needs_separator = False
+            if self.proposal_log_path.exists() and self.proposal_log_path.stat().st_size:
+                with self.proposal_log_path.open("rb") as existing:
+                    existing.seek(-1, os.SEEK_END)
+                    needs_separator = existing.read(1) != b"\n"
+            with self.proposal_log_path.open("a", encoding="utf-8") as handle:
+                if needs_separator:
+                    handle.write("\n")
+                handle.write(json.dumps(entry, ensure_ascii=False) + "\n")

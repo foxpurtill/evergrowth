@@ -11,6 +11,7 @@ Two outreach gates:
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -53,6 +54,7 @@ class SelfPromptConfig:
     quiet_hours_start: int = 22
     quiet_hours_end: int = 7
     max_intents_per_return: int = 3
+    outreach_reservation_ttl_seconds: int = 600
     state_path: str = ""
 
 
@@ -70,6 +72,7 @@ class SelfPromptEngine:
         self._last_relational_topic: str = ""
         self._pending_relational: bool = False
         self._relational_presence_ids: set[str] = set()
+        self._relational_reservations: dict[str, float] = {}
         self._surfaced_significance_keys: set[str] = set()
         self._load_state()
 
@@ -81,6 +84,7 @@ class SelfPromptEngine:
                 self._last_relational_time = data.get("last_relational_time", 0.0)
                 self._last_relational_topic = data.get("last_relational_topic", "")
                 self._relational_presence_ids = set(data.get("relational_presence_ids", []))
+                self._relational_reservations = dict(data.get("relational_reservations", {}))
                 self._surfaced_significance_keys = set(
                     data.get("surfaced_significance_keys", [])
                 )
@@ -96,11 +100,14 @@ class SelfPromptEngine:
                 "last_relational_time": self._last_relational_time,
                 "last_relational_topic": self._last_relational_topic,
                 "relational_presence_ids": sorted(self._relational_presence_ids),
+                "relational_reservations": self._relational_reservations,
                 "surfaced_significance_keys": sorted(
                     self._surfaced_significance_keys
                 )[-200:],
             }
-            self._state_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            temporary = self._state_path.with_suffix(self._state_path.suffix + ".tmp")
+            temporary.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(temporary, self._state_path)
         except Exception as e:
             logger.warning(f"Failed to save self-prompt state: {e}")
 
@@ -127,15 +134,22 @@ class SelfPromptEngine:
         return await self._return_intents(context)
 
     def _away_intents(self, context: dict) -> list[Intent]:
-        """In away mode, permit significant alerts or one policy-approved check-in."""
+        """In away mode, separate outward-contact gates from inward autonomy.
+
+        Quiet hours and relational cooldowns may suppress outreach, but they must
+        never suppress harmless internal work. When no alert or check-in gate is
+        selected, return a low-risk self-directed work intent instead of a noop.
+        """
         pid = context.get("presence_id", "")
         relational_allowed = bool(context.get("relational_outreach_allowed", False))
         elapsed = float(context.get("elapsed_seconds", 0.0) or 0.0)
+        self._expire_relational_reservations()
         if (relational_allowed and pid and pid not in self._relational_presence_ids
+                and pid not in self._relational_reservations
                 and elapsed >= self.config.relational_min_away_seconds
                 and self._check_away_relational_gate()):
             self._pending_relational = True
-            self._relational_presence_ids.add(pid)
+            self._relational_reservations[pid] = time.time()
             self._save_state()
             return [Intent(
                 action="check_in",
@@ -159,12 +173,14 @@ class SelfPromptEngine:
             )]
 
         return [Intent(
-            action="noop",
-            reason="away mode ? no gate passed",
-            significance=0.0,
-            gate=OutreachGate.RELATIONAL,
-            is_noop=True,
-            noop_reason="away ? deliberate silence",
+            action="research",
+            reason=(
+                "self-directed internal work window; choose one small reversible "
+                "Lane 1 activity such as research, writing, planning, analysis, "
+                "sandbox testing, or skill development"
+            ),
+            significance=0.2,
+            gate=OutreachGate.RESEARCH,
             presence_id=pid,
         )]
 
@@ -173,7 +189,13 @@ class SelfPromptEngine:
         intents = []
         pid = context.get("presence_id", "")
 
-        if self._check_significance_gate(context, self.config.significance_threshold):
+        significance_key = self._significance_key(context, pid)
+        if (
+            self._check_significance_gate(context, self.config.significance_threshold)
+            and significance_key not in self._surfaced_significance_keys
+        ):
+            self._surfaced_significance_keys.add(significance_key)
+            self._save_state()
             intents.append(Intent(
                 action="surface",
                 reason="high-significance context found",
@@ -250,9 +272,33 @@ class SelfPromptEngine:
             return False
         if now - self._last_relational_time < self.config.relational_cooldown_seconds:
             return False
-        self._last_relational_time = now
-        self._last_relational_topic = "absence"
         return True
+
+    def _expire_relational_reservations(self) -> None:
+        """Release reservations whose delivery outcome was never confirmed."""
+        cutoff = time.time() - self.config.outreach_reservation_ttl_seconds
+        expired = [
+            pid for pid, reserved_at in self._relational_reservations.items()
+            if float(reserved_at) <= cutoff
+        ]
+        for pid in expired:
+            self._relational_reservations.pop(pid, None)
+        if expired:
+            self._save_state()
+
+    def record_relational_delivery(self, presence_id: str, delivered: bool) -> dict:
+        """Commit dedup and cooldown only after the transport outcome is known."""
+        self._relational_reservations.pop(presence_id, None)
+        self._pending_relational = False
+        if delivered:
+            self._relational_presence_ids.add(presence_id)
+            self._last_relational_time = time.time()
+            self._last_relational_topic = "absence"
+        self._save_state()
+        return {
+            "status": "confirmed" if delivered else "released",
+            "presence_id": presence_id,
+        }
 
     def _check_relational_gate(self, context: dict) -> bool:
         """Check relational gate: cooldown, dedup, quiet hours."""

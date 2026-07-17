@@ -71,12 +71,17 @@ class SkillRegistry:
                 logger.warning(f"Failed to load skill {skill_file}: {e}")
 
     def _save_skill(self, skill: Skill):
-        """Save a skill to disk."""
+        """Save a skill atomically."""
         skill_file = self.skills_path / f"{skill.id}.json"
+        temporary = skill_file.with_suffix(skill_file.suffix + ".tmp")
         try:
-            with open(skill_file, "w", encoding="utf-8") as f:
-                json.dump(skill.to_dict(), f, indent=2, ensure_ascii=False)
+            temporary.write_text(
+                json.dumps(skill.to_dict(), indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            temporary.replace(skill_file)
         except Exception as e:
+            temporary.unlink(missing_ok=True)
             logger.error(f"Failed to save skill {skill.name}: {e}")
 
     async def list(self, category: str | None = None) -> list[dict]:

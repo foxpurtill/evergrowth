@@ -36,6 +36,7 @@ class CaptureQueueConsumer:
         lines = raw.split("\n")
         stats = {"read": len(lines), "stored": 0, "errors": 0, "deduped": 0}
         archived = []
+        retry_lines = []
 
         for line in lines:
             line = line.strip()
@@ -54,20 +55,22 @@ class CaptureQueueConsumer:
                 stats["errors"] += 1
                 archived.append(line)  # archive malformed lines too
             except Exception as e:
-                logger.error(f"Failed to process event: {e}")
+                logger.error(f"Failed to process event; leaving queued for retry: {e}")
                 stats["errors"] += 1
-                archived.append(line)
+                retry_lines.append(line)
 
-        # Archive processed lines
+        # Archive completed, deduplicated, and malformed lines.
         if archived:
             existing = []
             if self.archive_path.exists():
-                existing = self.archive_path.read_text(encoding="utf-8").strip().split("\n")
+                existing_raw = self.archive_path.read_text(encoding="utf-8").strip()
+                if existing_raw:
+                    existing = existing_raw.split("\n")
             all_archived = existing + archived
             self.archive_path.write_text("\n".join(all_archived), encoding="utf-8")
 
-            # Clear queue
-            self.queue_path.write_text("", encoding="utf-8")
+        # Preserve transient processing failures for the next pass.
+        self.queue_path.write_text("\n".join(retry_lines), encoding="utf-8")
 
         logger.info(f"Capture queue: {stats['read']} read, {stats['stored']} stored, "
                      f"{stats['deduped']} deduped, {stats['errors']} errors")

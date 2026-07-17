@@ -54,11 +54,16 @@ class IdentityManager:
         }
 
     def _save_state(self):
-        """Save identity state to file."""
+        """Save identity state atomically."""
+        temporary = self.state_file.with_suffix(self.state_file.suffix + ".tmp")
         try:
-            with open(self.state_file, "w", encoding="utf-8") as f:
-                json.dump(self._state, f, indent=2, ensure_ascii=False)
+            temporary.write_text(
+                json.dumps(self._state, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            temporary.replace(self.state_file)
         except Exception as e:
+            temporary.unlink(missing_ok=True)
             logger.error(f"Failed to save identity state: {e}")
 
     async def read(self, section: str | None = None) -> dict:

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -28,10 +30,59 @@ class TelemetryStore:
     def __init__(self, path: str | Path):
         self.path = Path(path).expanduser()
 
+    @contextmanager
+    def _write_lock(self, timeout_seconds: float = 5.0):
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        deadline = time.time() + timeout_seconds
+        while True:
+            try:
+                descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(descriptor, str(os.getpid()).encode("ascii"))
+                os.close(descriptor)
+                break
+            except FileExistsError:
+                try:
+                    owner_pid = int(lock_path.read_text(encoding="ascii"))
+                    os.kill(owner_pid, 0)
+                    owner_alive = True
+                except (OSError, ValueError):
+                    owner_pid = 0
+                    owner_alive = False
+                try:
+                    lock_age = max(0.0, time.time() - lock_path.stat().st_mtime)
+                except OSError:
+                    lock_age = 0.0
+                if (owner_pid > 0 and not owner_alive) or (owner_pid == 0 and lock_age > 5.0):
+                    try:
+                        lock_path.unlink(missing_ok=True)
+                    except PermissionError:
+                        time.sleep(0.01)
+                    continue
+                if time.time() >= deadline:
+                    raise TimeoutError("telemetry store busy")
+                time.sleep(0.01)
+        try:
+            yield
+        finally:
+            for _ in range(50):
+                try:
+                    lock_path.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    time.sleep(0.01)
+
     def record(self, event: TelemetryEvent) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(asdict(event), ensure_ascii=False) + "\n")
+        with self._write_lock():
+            needs_separator = self.path.exists() and self.path.stat().st_size > 0
+            if needs_separator:
+                with self.path.open("rb") as existing:
+                    existing.seek(-1, 2)
+                    needs_separator = existing.read(1) != b"\n"
+            with self.path.open("a", encoding="utf-8") as handle:
+                if needs_separator:
+                    handle.write("\n")
+                handle.write(json.dumps(asdict(event), ensure_ascii=False) + "\n")
 
     def recent(self, kind: str | None = None, limit: int = 100) -> list[TelemetryEvent]:
         if not self.path.exists():
@@ -40,10 +91,11 @@ class TelemetryStore:
         for line in self.path.read_text(encoding="utf-8").splitlines():
             try:
                 raw = json.loads(line)
-            except json.JSONDecodeError:
+                event = TelemetryEvent(**raw)
+            except (json.JSONDecodeError, TypeError, ValueError):
                 continue
-            if kind is None or raw.get("kind") == kind:
-                events.append(TelemetryEvent(**raw))
+            if kind is None or event.kind == kind:
+                events.append(event)
         return events[-limit:]
 
 
@@ -139,6 +191,8 @@ class DeploymentVerifier:
 
     def _write(self, report: DeploymentReport) -> None:
         self.marker_path.parent.mkdir(parents=True, exist_ok=True)
-        self.marker_path.write_text(
+        temporary = self.marker_path.with_suffix(self.marker_path.suffix + ".tmp")
+        temporary.write_text(
             json.dumps(asdict(report), indent=2, ensure_ascii=False), encoding="utf-8"
         )
+        temporary.replace(self.marker_path)

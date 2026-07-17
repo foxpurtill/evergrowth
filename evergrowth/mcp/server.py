@@ -287,6 +287,18 @@ class EvergrowthMCPServer:
                 inputSchema={"type": "object", "properties": {}},
             ),
             Tool(
+                name="heartbeat_record_delivery",
+                description="Record the confirmed outcome of relational outreach",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "presence_id": {"type": "string"},
+                        "delivered": {"type": "boolean"},
+                    },
+                    "required": ["presence_id", "delivered"],
+                },
+            ),
+            Tool(
                 name="heartbeat_set_interval",
                 description="Set next heartbeat interval in minutes",
                 inputSchema={
@@ -393,6 +405,7 @@ class EvergrowthMCPServer:
                 "session_log": self._session_log,
                 "heartbeat_status": self._heartbeat_status,
                 "heartbeat_evaluate": self._heartbeat_evaluate,
+                "heartbeat_record_delivery": self._heartbeat_record_delivery,
                 "heartbeat_set_interval": self._heartbeat_set_interval,
                 "capture_submit": self._capture_submit,
                 "health_check": self._health_check,
@@ -417,8 +430,12 @@ class EvergrowthMCPServer:
                 )
 
             result = await handler(arguments)
+            is_error = isinstance(result, dict) and (
+                "error" in result or result.get("status") in {"error", "failed"}
+            )
             return CallToolResult(
-                content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+                content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+                isError=is_error,
             )
 
         except Exception as e:
@@ -585,6 +602,11 @@ class EvergrowthMCPServer:
 
     async def _heartbeat_evaluate(self, args: dict) -> dict:
         return await self.heartbeat.evaluate_self_prompt()
+
+    async def _heartbeat_record_delivery(self, args: dict) -> dict:
+        return self.heartbeat.record_relational_delivery(
+            args["presence_id"], bool(args["delivered"])
+        )
 
     async def _heartbeat_set_interval(self, args: dict) -> dict:
         self.heartbeat.set_next_interval(args["minutes"])

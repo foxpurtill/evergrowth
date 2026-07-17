@@ -37,6 +37,10 @@ def speak(text: str, block: bool = False, voice: str = DEFAULT_VOICE) -> str | N
 
     Returns the path to the saved audio file, or None on failure.
     """
+    if not Path(ORPHEUS_PYTHON).exists() or not Path(ORPHEUS_SCRIPT).exists():
+        logger.debug("Orpheus TTS is not installed; autonomous speech is disabled")
+        return None
+
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     text = _preprocess(text)

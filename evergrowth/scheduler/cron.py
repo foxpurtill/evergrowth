@@ -3,9 +3,11 @@
 import json
 import logging
 import time
+from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 logger = logging.getLogger("evergrowth.scheduler")
@@ -44,18 +46,28 @@ class CronScheduler:
         if self.jobs_file.exists():
             try:
                 with open(self.jobs_file, encoding="utf-8") as f:
-                    self._jobs = json.load(f)
-                # Re-register jobs with the scheduler
-                for job in self._jobs:
-                    self._register_job(job)
+                    loaded = json.load(f)
+                if not isinstance(loaded, list):
+                    raise ValueError("scheduled jobs file must contain a list")
+                self._jobs = []
+                for job in loaded:
+                    if not isinstance(job, dict) or not isinstance(job.get("id"), str):
+                        logger.warning("Skipping malformed scheduled job entry: %r", job)
+                        continue
+                    self._jobs.append(job)
+                    if job.get("enabled", True):
+                        self._register_job(job)
             except Exception as e:
                 logger.warning(f"Failed to load scheduled jobs: {e}")
 
     def _save_jobs(self):
         """Save scheduled jobs to disk."""
         try:
-            with open(self.jobs_file, "w", encoding="utf-8") as f:
-                json.dump(self._jobs, f, indent=2, ensure_ascii=False)
+            temporary = self.jobs_file.with_suffix(self.jobs_file.suffix + ".tmp")
+            temporary.write_text(
+                json.dumps(self._jobs, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            temporary.replace(self.jobs_file)
         except Exception as e:
             logger.error(f"Failed to save scheduled jobs: {e}")
 
@@ -72,10 +84,9 @@ class CronScheduler:
             elif job_type == "cron":
                 trigger = CronTrigger.from_crontab(job.get("cron_expression", "0 * * * *"))
             elif job_type == "once":
-                # One-shot — schedule for the specified time
+                # One-shot jobs must use a non-repeating date trigger.
                 run_at = job.get("run_at", time.time())
-                delay = max(0, run_at - time.time())
-                trigger = IntervalTrigger(seconds=delay, start_date=time.time())
+                trigger = DateTrigger(run_date=datetime.fromtimestamp(run_at))
             else:
                 return
 
@@ -102,6 +113,10 @@ class CronScheduler:
         # For now, log it
         action = job.get("action", "No action defined")
         logger.info(f"Job {job_name}: {action}")
+
+        if job.get("type") == "once":
+            self._jobs = [item for item in self._jobs if item.get("id") != job.get("id")]
+            self._save_jobs()
 
     def add_interval_job(
         self,

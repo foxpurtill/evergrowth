@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import json
 import logging
+import os
 import random
 import time
 
@@ -45,8 +46,12 @@ class HeartbeatEngine:
             self.capture_consumer = CaptureQueueConsumer(memory, capture_queue_path)
 
         self._active = 0  # 0=off, 1=on — single source of truth
-        self._user_interval: int | None = config.heartbeat.default_interval_minutes  # From config
+        # A configured default is the starting cadence, not a permanent user override.
+        # After the first response, the DI's next:N signal controls the rhythm unless
+        # set_user_interval() is explicitly called by a human.
+        self._user_interval: int | None = None
         self._timer: asyncio.TimerHandle | None = None
+        self._fire_task: asyncio.Task | None = None
         self._last_interval = config.heartbeat.default_interval_minutes
         self._first_beat = True
         self._beat_count = 0
@@ -130,9 +135,13 @@ class HeartbeatEngine:
             "context": self._presence_context,
             "away_started_at": self._away_started_at,
         }
-        self.presence_state_path.write_text(
+        temporary_path = self.presence_state_path.with_suffix(
+            self.presence_state_path.suffix + ".tmp"
+        )
+        temporary_path.write_text(
             json.dumps(payload, indent=2), encoding="utf-8"
         )
+        os.replace(temporary_path, self.presence_state_path)
 
     def _load_presence_state(self) -> None:
         """Restore presence mode and context from the durable runtime state."""
@@ -190,6 +199,12 @@ class HeartbeatEngine:
                 for intent in intents
             ],
         }
+
+    def record_relational_delivery(self, presence_id: str, delivered: bool) -> dict:
+        """Forward a confirmed transport outcome to the self-prompt engine."""
+        if not self.self_prompt:
+            return {"status": "unavailable", "presence_id": presence_id}
+        return self.self_prompt.record_relational_delivery(presence_id, delivered)
 
     @staticmethod
     def _parse_utc_timestamp(value: str | None) -> float | None:
@@ -323,6 +338,9 @@ class HeartbeatEngine:
         if self._timer:
             self._timer.cancel()
             self._timer = None
+        if self._fire_task and not self._fire_task.done():
+            self._fire_task.cancel()
+        self._fire_task = None
         self._log("Heartbeat stopped")
 
     def toggle(self) -> int:
@@ -353,9 +371,27 @@ class HeartbeatEngine:
 
         self._timer = self._loop.call_later(
             delay_minutes * 60,
-            lambda: asyncio.ensure_future(self._fire()),
+            self._launch_fire,
         )
         self._log(f"Next heartbeat in {delay_minutes} minutes")
+
+    def _launch_fire(self):
+        """Launch and track the active heartbeat task."""
+        if not self._active or self._loop is None:
+            return
+        task = self._loop.create_task(self._fire())
+        self._fire_task = task
+        task.add_done_callback(self._on_fire_done)
+
+    def _on_fire_done(self, task: asyncio.Task):
+        """Clear the tracked task and surface unexpected failures."""
+        if self._fire_task is task:
+            self._fire_task = None
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            self._log(f"Heartbeat task failed: {exc}")
 
     async def _fire(self):
         """Fire the heartbeat — build prompt, inject, wait for signal."""
@@ -379,13 +415,27 @@ class HeartbeatEngine:
         prompt = await self._build_prompt()
         self._log(f"Prompt length: {len(prompt)} chars")
 
-        # Write prompt to file for the DI to read (or inject via MCP)
-        prompt_file = self.data_dir / "heartbeat_prompt.txt"
+        # A signal is valid only for this beat. Remove any stale or externally
+        # written signal before publishing the new prompt.
         try:
-            prompt_file.write_text(prompt, encoding="utf-8")
-            self._log(f"Prompt written to {prompt_file}")
-        except Exception as e:
-            self._log(f"Failed to write prompt: {e}")
+            self.signal_path.unlink(missing_ok=True)
+        except OSError as exc:
+            self._log(f"Failed to clear stale heartbeat signal: {exc}")
+
+        # Never overwrite or queue behind an unfinished prompt. After a restart,
+        # the DI loop resumes heartbeat_prompt.processing first; this heartbeat
+        # simply waits for that recovered work to complete.
+        prompt_file = self.data_dir / "heartbeat_prompt.txt"
+        processing_file = self.data_dir / "heartbeat_prompt.processing"
+        if processing_file.exists() or prompt_file.exists():
+            existing = processing_file if processing_file.exists() else prompt_file
+            self._log(f"Existing heartbeat prompt retained: {existing}")
+        else:
+            try:
+                prompt_file.write_text(prompt, encoding="utf-8")
+                self._log(f"Prompt written to {prompt_file}")
+            except Exception as e:
+                self._log(f"Failed to write prompt: {e}")
 
         # Wait for DI to write signal file with next interval
         found = await self._wait_for_signal()
@@ -455,11 +505,10 @@ class HeartbeatEngine:
             prompt = random.choice(all_prompts) if all_prompts else DEFAULT_PROMPTS[0]
             parts.append(prompt)
 
-        # Signal file instruction (once per session)
+        # Cadence is returned as next:N in the model response; the DI loop
+        # publishes the corresponding heartbeat signal only after success.
         if self._first_beat:
-            parts.append(
-                f"\n[Pulse: to trigger next beat, write 'next:N' to {self.signal_path}]"
-            )
+            parts.append("\n[Pulse: complete one activity and end with next:N.]")
 
         return "\n\n".join(parts)
 

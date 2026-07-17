@@ -183,6 +183,59 @@ class LMStudioProvider(AIProvider):
             return data["choices"][0]["message"]["content"]
 
 
+class HermesProvider(AIProvider):
+    """Hermes OAuth-backed provider via the local delegation wrapper."""
+
+    def __init__(self, wrapper_path: str, cwd: str, timeout: int = 90,
+                 model: str = "gpt-5.6", policy_path: str = ""):
+        self.wrapper_path = wrapper_path
+        self.cwd = cwd
+        self.timeout = int(timeout)
+        self.model = model
+        self.policy_path = policy_path
+
+    def name(self) -> str:
+        return f"hermes/{self.model}"
+
+    async def complete(self, messages: list[dict], max_tokens: int = 2048,
+                       temperature: float = 0.7) -> str:
+        import asyncio
+        import sys
+
+        rendered = []
+        for message in messages:
+            role = str(message.get("role", "user")).upper()
+            content = str(message.get("content", "")).strip()
+            if content:
+                rendered.append(f"[{role}]\n{content}")
+        policy = ""
+        if self.policy_path:
+            from pathlib import Path
+            path = Path(self.policy_path).expanduser()
+            if path.exists():
+                policy = path.read_text(encoding="utf-8").strip()
+        prompt = (
+            "You are operating as Evergrowth's bounded autonomous reasoning provider. "
+            "Follow the supplied identity, safety, and task instructions exactly.\n\n"
+            + (f"[AUTONOMY POLICY]\n{policy}\n\n" if policy else "")
+            + "\n\n".join(rendered)
+        )
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, self.wrapper_path, prompt,
+            "--cwd", self.cwd, "--timeout", str(self.timeout),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"Hermes delegation failed: {detail or proc.returncode}")
+        answer = stdout.decode("utf-8", errors="replace").strip()
+        if not answer:
+            raise RuntimeError("Hermes delegation returned an empty response")
+        return answer
+
+
 def load_provider(config: dict) -> AIProvider:
     """Load the AI provider from config."""
     provider_type = config.get("provider", "openai").lower()
@@ -220,6 +273,17 @@ def load_provider(config: dict) -> AIProvider:
         return LMStudioProvider(
             model=config.get("model", "default"),
             base_url=config.get("base_url", "http://localhost:1234"),
+        )
+
+    elif provider_type == "hermes":
+        return HermesProvider(
+            wrapper_path=config.get(
+                "wrapper_path", r"C:\Users\susur\Ethan\hermes_delegate.py"
+            ),
+            cwd=config.get("cwd", r"C:\Users\susur\Ethan"),
+            timeout=config.get("timeout", 90),
+            model=config.get("model", "gpt-5.6"),
+            policy_path=config.get("policy_path", ""),
         )
 
     else:
