@@ -200,3 +200,4 @@ def test_return_research_gate_empty_context(tmp_path):
     }))
 
     assert intents[0].is_noop is True
+    assert intents[0].noop_reason == "nothing significant or relational to surface"
