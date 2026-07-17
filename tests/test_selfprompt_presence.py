@@ -1,6 +1,6 @@
 import asyncio
 
-from evergrowth.selfprompt.engine import PresenceMode, SelfPromptConfig, SelfPromptEngine
+from evergrowth.selfprompt.engine import OutreachGate, PresenceMode, SelfPromptConfig, SelfPromptEngine
 
 
 def run(coro):
@@ -156,3 +156,48 @@ def test_away_quiet_hours_suppress_outreach_not_internal_work(tmp_path):
 
     assert intents[0].action == "research"
     assert intents[0].is_noop is False
+
+
+def test_away_research_fallback_no_presence_id(tmp_path):
+    """Away research intent does not require a presence_id."""
+    config = SelfPromptConfig(
+        state_path=str(tmp_path / "selfprompt_state.json"),
+        relational_min_away_seconds=9999,
+        relational_cooldown_seconds=9999,
+    )
+    engine = SelfPromptEngine(memory=None, config=config)
+    engine.set_mode(PresenceMode.AWAY)
+
+    intents = run(engine.select_intent({
+        "presence_id": "",
+        "elapsed_seconds": 9999,
+        "relational_outreach_allowed": False,
+    }))
+
+    assert intents[0].action == "research"
+    assert intents[0].gate == OutreachGate.RESEARCH
+    assert intents[0].significance == 0.2
+
+
+def test_return_research_gate_empty_context(tmp_path):
+    """Research gate falls through to noop when no patterns present."""
+    config = SelfPromptConfig(
+        state_path=str(tmp_path / "selfprompt_state.json"),
+        relational_min_away_seconds=9999,
+        relational_cooldown_seconds=9999,
+        quiet_hours_start=0,
+        quiet_hours_end=24,
+    )
+    import time
+    engine = SelfPromptEngine(memory=None, config=config)
+    engine._last_relational_time = time.time() + 9999
+    engine.set_mode(PresenceMode.RETURN)
+
+    intents = run(engine.select_intent({
+        "presence_id": "",
+        "elapsed_seconds": 0,
+        "active_patterns": [],
+    }))
+
+    assert intents[0].is_noop is True
+    assert intents[0].noop_reason == "nothing significant or relational to surface"
